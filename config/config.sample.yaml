@@ -1,0 +1,104 @@
+# Matrix DingTalk Bridge sample configuration.
+# Use snake_case keys in this file.
+
+bridge:
+  domain: "localhost"
+  homeserver_url: "http://localhost:8008"
+  port: 9006
+  bind_address: "0.0.0.0"
+  bridge_id: "dingtalk"
+  appservice_token: "CHANGE_ME_AS_TOKEN"
+  homeserver_token: "CHANGE_ME_HS_TOKEN"
+  presence_interval: 500
+  disable_presence: false
+  disable_typing_notifications: false
+  disable_deletion_forwarding: false
+  disable_portal_bridging: false
+  enable_self_service_bridging: false
+  disable_read_receipts: false
+  disable_join_leave_notifications: false
+  disable_invite_notifications: false
+  disable_room_topic_notifications: false
+  admin_mxid: "@admin:localhost"
+  user_limit: null
+
+auth:
+  # DingTalk Webhook access tokens (one per group/chat)
+  # You can get these from the DingTalk robot settings
+  webhooks:
+    # Example: 
+    # "chat_id_1": "access_token_1"
+    # "chat_id_2": "access_token_2"
+  
+  # DingTalk Robot security settings
+  security:
+    # Security type: "keyword", "sign", or "ip"
+    type: "sign"
+    # If type is "keyword", specify the keyword
+    keyword: null
+    # If type is "sign", specify the secret
+    secret: "CHANGE_ME_SECRET"
+    # If type is "ip", specify allowed IPs
+    ip_whitelist: []
+
+logging:
+  level: "info"
+  line_date_format: "MMM-D HH:mm:ss.SSS"
+  format: "pretty"
+  files: []
+
+database:
+  # Choose one:
+  # filename: "dingtalk.db"
+  # url: "postgresql://user:password@localhost/matrix_dingtalk"
+  # url: "mysql://user:password@localhost:3306/matrix_dingtalk"
+  url: "sqlite://./dingtalk.db"
+  max_connections: 10
+  min_connections: 1
+
+room:
+  default_visibility: "public"
+  room_alias_prefix: "_dingtalk_"
+  enable_room_creation: true
+  kick_for: 30000
+
+channel:
+  name_pattern: "[DingTalk] :name"
+  enable_channel_creation: true
+  topic_format: "Bridged from Matrix room {room_id}"
+  delete_options:
+    disable_messaging: false
+    unset_room_alias: true
+    unlist_from_directory: true
+    set_invite_only: true
+    ghosts_leave: true
+
+limits:
+  room_ghost_join_delay: 6000
+  dingtalk_send_delay: 1500
+  room_count: -1
+  matrix_event_age_limit_ms: 900000
+  # DingTalk rate limit: 20 messages per minute per webhook
+  dingtalk_rate_limit_per_minute: 20
+
+ghosts:
+  nick_pattern: ":nick"
+  username_pattern: ":username"
+  username_template: "_dingtalk_{user_id}"
+  displayname_template: "{username}"
+  avatar_url_template: null
+
+# DingTalk callback server (optional, for receiving messages from DingTalk)
+callback:
+  enabled: false
+  port: 9007
+  bind_address: "0.0.0.0"
+  # Token for verifying callbacks from DingTalk
+  token: "CHANGE_ME_CALLBACK_TOKEN"
+  # AES key for decrypting callbacks (optional)
+  aes_key: null
+
+metrics:
+  enabled: false
+  port: 9008
+  bind_address: "127.0.0.1"
