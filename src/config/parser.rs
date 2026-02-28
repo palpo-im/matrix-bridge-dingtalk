@@ -319,7 +319,7 @@ pub struct ChannelConfig {
     pub delete_options: ChannelDeleteOptionsConfig,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct ChannelDeleteOptionsConfig {
     #[serde(default)]
     pub name_prefix: Option<String>,

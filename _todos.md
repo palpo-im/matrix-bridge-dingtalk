@@ -13,10 +13,10 @@
 - [ ] 创建 README.md 和 README_CN.md
 
 ### 1.2 配置系统
-- [ ] 实现配置文件解析 (config.yaml)
-- [ ] 创建示例配置文件 config/config.sample.yaml
-- [ ] 实现环境变量覆盖配置
-- [ ] 实现配置验证器
+- [x] 实现配置文件解析 (config.yaml)
+- [x] 创建示例配置文件 config/config.sample.yaml
+- [x] 实现环境变量覆盖配置
+- [x] 实现配置验证器
 
 ### 1.3 数据库层
 - [ ] 设计数据库模型 (room_mapping, message_mapping, user_mapping)
