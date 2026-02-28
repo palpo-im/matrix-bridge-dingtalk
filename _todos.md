@@ -19,12 +19,16 @@
 - [x] 实现配置验证器
 
 ### 1.3 数据库层
-- [ ] 设计数据库模型 (room_mapping, message_mapping, user_mapping)
-- [ ] 实现 PostgreSQL 支持
-- [ ] 实现 SQLite 支持
-- [ ] 实现 MySQL 支持
-- [ ] 创建数据库迁移脚本 migrations/001_initial.sql
-- [ ] 实现 DatabaseManager
+- [x] 设计数据库模型 (room_mapping, message_mapping, user_mapping)
+- [x] 实现 PostgreSQL 支持 (90% 完成,需要修复可变引用)
+- [x] 实现 SQLite 支持 (90% 完成,需要添加 diesel derive structs)
+- [x] 实现 MySQL 支持 (占位符实现)
+- [x] 创建数据库迁移脚本 migrations/001_initial.sql
+- [x] 实现 DatabaseManager
+
+**注**: 数据库层基本完成,但有编译错误需要修复:
+- PostgreSQL 和 SQLite 实现需要将 `&conn` 改为 `&mut conn`
+- SQLite 需要添加类似 PostgreSQL 的 DbXxxMapping 结构体
 
 ### 1.4 工具模块
 - [x] 实现日志系统 (utils/logging.rs)
