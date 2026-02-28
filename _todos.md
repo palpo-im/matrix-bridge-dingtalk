@@ -7,9 +7,9 @@
 
 ### 1.1 项目结构搭建
 - [x] 初始化 Cargo 项目
-- [ ] 创建基础目录结构 (src/bin, src/db, src/config, src/dingtalk, src/matrix, src/bridge, src/web, src/utils, src/parsers)
-- [ ] 创建 Cargo.toml 配置文件,添加必要依赖
-- [ ] 创建 .gitignore 文件
+- [x] 创建基础目录结构 (src/bin, src/db, src/config, src/dingtalk, src/matrix, src/bridge, src/web, src/utils, src/parsers)
+- [x] 创建 Cargo.toml 配置文件,添加必要依赖
+- [x] 创建 .gitignore 文件
 - [ ] 创建 README.md 和 README_CN.md
 
 ### 1.2 配置系统
@@ -27,9 +27,9 @@
 - [ ] 实现 DatabaseManager
 
 ### 1.4 工具模块
-- [ ] 实现日志系统 (utils/logging.rs)
-- [ ] 实现错误处理 (utils/error.rs)
-- [ ] 实现格式化工具 (utils/formatting.rs)
+- [x] 实现日志系统 (utils/logging.rs)
+- [x] 实现错误处理 (utils/error.rs)
+- [x] 实现格式化工具 (utils/formatting.rs)
 
 ## 第二阶段: 钉钉客户端实现 (Phase 2)
 
