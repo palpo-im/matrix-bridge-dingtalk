@@ -15,18 +15,26 @@ name = "matrix-bridge-dingtalk"
 path = "src/main.rs"
 
 [features]
-default = ["postgres", "sqlite"]
+default = ["sqlite"]
 postgres = ["diesel/postgres"]
 sqlite = ["diesel/sqlite", "dep:libsqlite3-sys"]
 mysql = ["diesel/mysql"]
 
 [dependencies]
-salvo = { version = "0.89", features = ["oapi", "quinn"] }
-tokio = { version = "1.40", features = ["full"] }
-hyper = { version = "1.8.1", features = ["full"] }
+salvo = { version = "0.89", default-features = false, features = [
+    "server",
+    "http1",
+    "logging",
+    "cors",
+    "oapi",
+    "affix-state",
+] }
+tokio = { version = "1", features = ["full"] }
 diesel = { version = "2.3.6", default-features = false, features = [
+    "sqlite",
     "r2d2",
     "chrono",
+    "uuid",
 ] }
 libsqlite3-sys = { version = "0.35.0", features = ["bundled"], optional = true }
 serde = { version = "1.0", features = ["derive"] }
@@ -57,6 +65,8 @@ hmac = "0.12"
 sha2 = "0.10"
 base64 = "0.22"
 hex = "0.4"
+urlencoding = "2.1"
+lru = "0.16"
 
 [dev-dependencies]
 tokio-test = "0.4"

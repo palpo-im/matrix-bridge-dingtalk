@@ -1,65 +1,199 @@
-#![forbid(unsafe_code)]
-#![allow(dead_code)]
-#![allow(unused_imports)]
-
+use std::path::PathBuf;
 use std::sync::Arc;
 
-use anyhow::Result;
-use tracing::{error, info};
+use anyhow::{Context, anyhow};
+use clap::{Args as ClapArgs, Parser, Subcommand};
+use matrix_bridge_dingtalk::bridge::DingTalkBridge;
+use matrix_bridge_dingtalk::config::Config;
+use reqwest::Client;
+use serde_json::{Value, json};
+use tracing::{Level, info};
+use tracing_subscriber::FmtSubscriber;
 
-mod admin;
-mod bridge;
-mod cache;
-mod cli;
-mod config;
-mod db;
-mod dingtalk;
-mod matrix;
-mod media;
-mod parsers;
-mod utils;
-mod web;
+#[derive(Parser, Debug)]
+#[command(name = "matrix-bridge-dingtalk")]
+#[command(version)]
+#[command(about = "A Matrix-DingTalk puppeting bridge")]
+struct CliArgs {
+    /// Path to config file
+    #[arg(short, long, default_value = "config.yaml")]
+    config: PathBuf,
 
-use config::Config;
-use utils::logging::init_tracing;
+    /// Generate example config and exit
+    #[arg(long)]
+    generate_config: bool,
+
+    #[command(subcommand)]
+    command: Option<Command>,
+}
+
+#[derive(Subcommand, Debug)]
+enum Command {
+    /// Show provisioning/admin runtime status
+    Status(StatusCommand),
+    /// List current Matrix <-> DingTalk mappings
+    Mappings(MappingsCommand),
+}
+
+#[derive(ClapArgs, Debug, Clone)]
+struct AdminApiTarget {
+    /// Admin API base URL
+    #[arg(long)]
+    admin_api: Option<String>,
+    /// Bearer token
+    #[arg(long)]
+    token: Option<String>,
+}
+
+#[derive(ClapArgs, Debug)]
+struct StatusCommand {
+    #[command(flatten)]
+    target: AdminApiTarget,
+}
+
+#[derive(ClapArgs, Debug)]
+struct MappingsCommand {
+    #[arg(long, default_value_t = 100)]
+    limit: i64,
+    #[arg(long, default_value_t = 0)]
+    offset: i64,
+    #[command(flatten)]
+    target: AdminApiTarget,
+}
+
+const EXAMPLE_CONFIG: &str = include_str!("../config/config.sample.yaml");
 
 #[tokio::main]
-async fn main() -> Result<()> {
-    init_tracing();
+async fn main() -> anyhow::Result<()> {
+    let args = CliArgs::parse();
 
-    let config = Arc::new(Config::load()?);
-    info!("matrix-dingtalk bridge starting up");
+    if args.generate_config {
+        println!("{}", EXAMPLE_CONFIG);
+        return Ok(());
+    }
 
-    // TODO: Initialize database
-    // let db_manager = Arc::new(db::DatabaseManager::new(&config.database).await?);
-    // db_manager.migrate().await?;
+    let config_path = args.config.to_string_lossy().to_string();
+    let config = Config::load_from_path(&config_path).with_context(|| {
+        format!(
+            "Failed to load config at '{}'; use --generate-config to print a template",
+            config_path
+        )
+    })?;
 
-    // TODO: Initialize Matrix client
-    // let matrix_client = Arc::new(matrix::MatrixAppservice::new(config.clone()).await?);
+    if let Some(command) = args.command {
+        run_management_command(command, &config).await?;
+        return Ok(());
+    }
 
-    // TODO: Initialize DingTalk client
-    // let dingtalk_client = Arc::new(dingtalk::DingTalkClient::new(config.clone()).await?);
+    FmtSubscriber::builder()
+        .with_max_level(Level::DEBUG)
+        .pretty()
+        .init();
 
-    // TODO: Initialize bridge core
-    // let bridge = Arc::new(bridge::BridgeCore::new(
-    //     matrix_client.clone(),
-    //     dingtalk_client.clone(),
-    //     db_manager.clone(),
-    // ));
+    info!(
+        "Starting Matrix-DingTalk bridge v{}",
+        env!("CARGO_PKG_VERSION")
+    );
 
-    // TODO: Start web server
-    // let web_server = web::WebServer::new(
-    //     config.clone(),
-    //     matrix_client.clone(),
-    //     db_manager.clone(),
-    //     bridge.clone(),
-    // ).await?;
+    let bridge = DingTalkBridge::new(config).await?;
+    let bridge = Arc::new(bridge);
 
-    info!("matrix-dingtalk bridge is ready (placeholder)");
+    let bridge_clone = bridge.clone();
+    tokio::select! {
+        result = bridge_clone.start() => {
+            if let Err(e) = result {
+                return Err(e);
+            }
+            info!("Bridge started");
+        }
+        _ = tokio::signal::ctrl_c() => {
+            info!("Received shutdown signal");
+        }
+    }
 
-    tokio::signal::ctrl_c().await?;
-    info!("received Ctrl+C, beginning shutdown");
+    bridge.stop().await;
+    info!("Bridge stopped");
 
-    info!("matrix-dingtalk bridge shutting down");
+    Ok(())
+}
+
+async fn run_management_command(command: Command, config: &Config) -> anyhow::Result<()> {
+    let client = Client::builder()
+        .build()
+        .context("failed to create HTTP client")?;
+
+    match command {
+        Command::Status(cmd) => {
+            let (base, token) = resolve_admin_access(config, &cmd.target);
+            let response = api_get(&client, &format!("{base}/status"), &token).await?;
+            print_json(&response)?;
+        }
+        Command::Mappings(cmd) => {
+            let (base, token) = resolve_admin_access(config, &cmd.target);
+            let url = format!(
+                "{base}/mappings?limit={}&offset={}",
+                cmd.limit.max(1),
+                cmd.offset.max(0)
+            );
+            let response = api_get(&client, &url, &token).await?;
+            print_json(&response)?;
+        }
+    }
+
+    Ok(())
+}
+
+fn resolve_admin_access(config: &Config, target: &AdminApiTarget) -> (String, String) {
+    let base = target.admin_api.clone().unwrap_or_else(|| {
+        format!(
+            "http://{}:{}/admin",
+            config.bridge.bind_address, config.bridge.port
+        )
+    });
+
+    let token = target
+        .token
+        .clone()
+        .or_else(|| std::env::var("MATRIX_BRIDGE_DINGTALK_PROVISIONING_TOKEN").ok())
+        .unwrap_or_else(|| config.registration.appservice_token.clone());
+
+    (base.trim_end_matches('/').to_string(), token)
+}
+
+async fn api_get(client: &Client, url: &str, token: &str) -> anyhow::Result<Value> {
+    let response = client
+        .get(url)
+        .bearer_auth(token)
+        .send()
+        .await
+        .with_context(|| format!("GET request failed: {url}"))?;
+    decode_api_response(response).await
+}
+
+async fn decode_api_response(response: reqwest::Response) -> anyhow::Result<Value> {
+    let status = response.status();
+    let body = response
+        .text()
+        .await
+        .context("failed to read API response body")?;
+    let payload = if body.trim().is_empty() {
+        json!({})
+    } else {
+        serde_json::from_str(&body).unwrap_or_else(|_| json!({ "raw": body }))
+    };
+
+    if !status.is_success() {
+        return Err(anyhow!(
+            "API request failed: status={} payload={}",
+            status,
+            payload
+        ));
+    }
+
+    Ok(payload)
+}
+
+fn print_json(value: &Value) -> anyhow::Result<()> {
+    println!("{}", serde_json::to_string_pretty(value)?);
     Ok(())
 }
