@@ -299,3 +299,43 @@ impl DingTalkClient {
         Ok(result)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::DingTalkClient;
+
+    #[test]
+    fn build_signed_url_appends_access_token() {
+        let client = DingTalkClient::new(
+            "https://oapi.dingtalk.com/robot/send".to_string(),
+            "token_123".to_string(),
+            None,
+        );
+
+        let url = client.build_signed_url();
+        assert!(url.contains("access_token=token_123"));
+    }
+
+    #[test]
+    fn build_signed_url_keeps_single_access_token_and_adds_sign_fields() {
+        let client = DingTalkClient::from_webhook_url(
+            "https://oapi.dingtalk.com/robot/send?access_token=token_abc".to_string(),
+            Some("secret_xyz".to_string()),
+        );
+
+        let url = client.build_signed_url();
+        let parsed = url::Url::parse(&url).expect("url should be valid");
+        let params: Vec<(String, String)> = parsed
+            .query_pairs()
+            .map(|(key, value)| (key.to_string(), value.to_string()))
+            .collect();
+
+        let access_token_count = params
+            .iter()
+            .filter(|(key, _)| key == "access_token")
+            .count();
+        assert_eq!(access_token_count, 1);
+        assert!(params.iter().any(|(key, _)| key == "timestamp"));
+        assert!(params.iter().any(|(key, _)| key == "sign"));
+    }
+}

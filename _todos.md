@@ -67,8 +67,8 @@
 - [x] 失败路径统一写入 dead-letter
 
 ### 第 4 阶段：测试与文档
-- [ ] 增加关键单测（签名 URL、回调字段解析、dead-letter cleanup、mapping API）
-- [ ] 更新 README / README_CN（能力边界、部署、已实现特性）
+- [x] 增加关键单测（签名 URL、回调字段解析、dead-letter cleanup、mapping API）
+- [x] 更新 README / README_CN（能力边界、部署、已实现特性）
 
 ---
 

@@ -4,172 +4,78 @@ A Matrix <-> DingTalk bridge written in Rust.
 
 [中文文档](README_CN.md)
 
-Maintainer: `Palpo Team`  
-Contact: `chris@acroidea.com`
+Maintainer: `Palpo Team`
 
 ## Status
 
-🚧 **Under Active Development** 🚧
+Usable baseline implemented. Core bidirectional text bridge, admin provisioning API, and dead-letter replay/cleanup are now available.
 
-This project is currently in early development stage. See [_todos.md](_todos.md) for progress.
+## Implemented
 
-## Overview
+- Matrix Appservice transaction handling
+- Matrix -> DingTalk text forwarding (by persisted room mapping)
+- DingTalk callback -> Matrix text forwarding
+- Per-conversation DingTalk webhook routing (token or full webhook URL)
+- Dedup via `processed_events`
+- Message mapping persistence via `message_mappings`
+- Dead-letter recording, listing, replay, and cleanup
+- Admin API: `status`, `mappings`, `bridge`, `unbridge`, `dead-letters/*`
+- CLI management commands: `status`, `mappings`, `replay`, `dead-letter-cleanup`
 
-- Rust-only implementation
-- Matrix appservice + DingTalk webhook bridge core
-- HTTP endpoints for health/status/metrics and provisioning
-- Database backends: PostgreSQL, SQLite, and MySQL (feature-gated)
-- Docker support (coming soon)
+## DingTalk Mode Notes
 
-## Features
-
-### Implemented
-- ✅ Project structure and configuration system
-- ✅ Configuration file parsing (YAML)
-- ✅ Environment variable overrides
-- ✅ Utils modules (error handling, logging, formatting)
-- ✅ Basic project skeleton
-
-### In Progress
-- 🚧 Database layer (PostgreSQL/SQLite/MySQL)
-- 🚧 DingTalk webhook client
-- 🚧 Matrix appservice integration
-- 🚧 Message bridge core logic
-
-### Planned
-- 📋 DingTalk message types support (text, markdown, link, actionCard, feedCard)
-- 📋 User presence synchronization
-- 📋 Media file bridging
-- 📋 Web UI for provisioning
-- 📋 Docker deployment
+- DingTalk has two common robot modes:
+  - Group custom webhook robot: outbound webhook send.
+  - Enterprise app chatbot: callback/event + session webhook.
+- This project supports webhook-based outbound and callback-based inbound text flow.
 
 ## Quick Start
 
-### Prerequisites
-
-- Rust toolchain (edition 2024)
-- A Matrix homeserver configured for appservices
-- DingTalk webhook access tokens
-- Database: PostgreSQL, SQLite, or MySQL
-
-### Configuration
-
-1. Copy the sample configuration:
+1. Copy config:
 
 ```bash
 cp config/config.sample.yaml config.yaml
 ```
 
-2. Edit `config.yaml` and set:
-   - `bridge.domain`: Your Matrix server domain
-   - `bridge.homeserver_url`: Your Matrix homeserver URL
-   - `auth.webhooks`: DingTalk webhook tokens mapping
-   - `database.url`: Database connection string
+2. Edit at least:
+- `bridge.domain`
+- `bridge.homeserver_url`
+- `database.url`
+- `registration.bridge_id`
+- `registration.appservice_token`
+- `registration.homeserver_token`
 
-3. Generate registration file (coming soon):
+3. Optional env overrides:
+- `DINGTALK_WEBHOOK_URL`
+- `DINGTALK_ACCESS_TOKEN`
+- `DINGTALK_SECRET`
+- `DINGTALK_CALLBACK_TOKEN`
+- `MATRIX_BRIDGE_DINGTALK_PROVISIONING_*_TOKEN`
+
+4. Run:
 
 ```bash
-cargo run -- --generate-registration
-```
-
-### Build and Run
-
-```bash
-# Build
-cargo build --release
-
-# Run
 cargo run --release
 ```
 
-## Configuration
+## Admin API
 
-### DingTalk Webhook Setup
+Base URL: `http://<bind_address>:<port>/admin`
 
-1. In DingTalk group chat, go to Group Settings → Smart Group Assistant
-2. Add a custom robot
-3. Configure security settings:
-   - **Keyword**: Messages must contain the keyword
-   - **Sign**: Messages must have valid signature (recommended)
-   - **IP Whitelist**: Only allow specific IPs
-4. Copy the webhook URL and extract the `access_token`
-5. Add to `config.yaml`:
+- `GET /status`
+- `GET /mappings?limit=100&offset=0`
+- `POST /bridge`
+- `POST /unbridge`
+- `GET /dead-letters?status=pending&limit=100`
+- `POST /dead-letters/<id>/replay`
+- `POST /dead-letters/replay`
+- `POST /dead-letters/cleanup`
 
-```yaml
-auth:
-  webhooks:
-    "chat_id": "access_token"
-  security:
-    type: "sign"
-    secret: "your_secret_here"
-```
+## Current Limits
 
-### Matrix Appservice Setup
-
-Add to your Matrix homeserver configuration:
-
-```yaml
-app_service_config_files:
-  - /path/to/dingtalk-registration.yaml
-```
-
-## Architecture
-
-```
-src/
-├── config/          # Configuration parsing and validation
-├── db/              # Database layer (models, migrations)
-├── dingtalk/        # DingTalk webhook client
-├── matrix/          # Matrix appservice client
-├── bridge/          # Bridge core logic
-│   ├── message_flow.rs    # Message transformation
-│   ├── user_sync.rs       # User synchronization
-│   └── provisioning.rs    # Room provisioning
-├── web/             # HTTP server endpoints
-├── utils/           # Utilities (error, logging, formatting)
-└── parsers/         # Message format parsers
-```
-
-## Supported Message Types
-
-### DingTalk → Matrix
-- Text → m.text
-- Markdown → m.text (with formatting)
-- Link → m.text (with preview)
-- ActionCard → m.text (with buttons)
-- FeedCard → m.text (multiple links)
-
-### Matrix → DingTalk
-- m.text → Text or Markdown
-- m.image → Markdown (with image URL)
-- m.video → Markdown (with video URL)
-- m.file → Markdown (with file URL)
-
-## Development
-
-### Running Tests
-
-```bash
-cargo test
-```
-
-### Code Style
-
-```bash
-cargo fmt
-cargo clippy
-```
+- Focuses on text path first.
+- Rich media/event types are not fully bridged yet.
 
 ## License
 
 Apache-2.0
-
-## Contributing
-
-Contributions are welcome! Please read the contributing guidelines first.
-
-## Acknowledgments
-
-- [matrix-bridge-discord](https://github.com/palpo-im/matrix-bridge-discord) - Reference implementation
-- [matrix-bot-sdk](https://github.com/palpo-im/matrix-bot-sdk) - Matrix Rust SDK
-- [DingTalk Open Platform](https://open.dingtalk.com/) - DingTalk API documentation

@@ -173,3 +173,36 @@ pub struct DingTalkSendMessageResponse {
     #[serde(default)]
     pub message_id: Option<String>,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::DingTalkWebhookMessage;
+
+    #[test]
+    fn parse_callback_alias_fields() {
+        let payload = serde_json::json!({
+            "msgtype": "text",
+            "text": { "content": "hello from dingtalk" },
+            "senderId": "user_123",
+            "conversationId": "conv_456",
+            "msgId": "msg_789",
+            "sessionWebhook": "https://example.com/session/webhook"
+        });
+
+        let event: DingTalkWebhookMessage =
+            serde_json::from_value(payload).expect("callback payload should parse");
+
+        assert_eq!(event.msgtype.as_deref(), Some("text"));
+        assert_eq!(
+            event.text.as_ref().and_then(|text| text.content.as_deref()),
+            Some("hello from dingtalk")
+        );
+        assert_eq!(event.sender_id.as_deref(), Some("user_123"));
+        assert_eq!(event.conversation_id.as_deref(), Some("conv_456"));
+        assert_eq!(event.msg_id.as_deref(), Some("msg_789"));
+        assert_eq!(
+            event.session_webhook.as_deref(),
+            Some("https://example.com/session/webhook")
+        );
+    }
+}
