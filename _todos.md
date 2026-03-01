@@ -6,69 +6,58 @@
 | 项目 | 总代码行数 | 主要模块 |
 |------|-----------|---------|
 | matrix-bridge-feishu | 11,779 行 | 完整实现 |
-| matrix-bridge-dingtalk | 2,132 行 | 骨架/占位符 |
+| matrix-bridge-dingtalk | ~5,000+ 行 | 第一阶段完成 |
 
 ### 模块实现对比
 
-| 模块 | Feishu 实现 | DingTalk 实现 | 差异 |
+| 模块 | Feishu 实现 | DingTalk 实现 | 状态 |
 |------|------------|--------------|------|
-| bridge/ | 4,530 行 | 7 行 (占位符) | 核心桥接逻辑缺失 |
-| feishu/dingtalk 客户端 | 2,909 行 | 7 行 (占位符) | API 客户端缺失 |
-| database/ | 1,810 行 | 1,366 行 | 基本完成 |
-| formatter/ | 569 行 | 0 行 (不存在) | 消息格式转换缺失 |
-| web/ | 1,296 行 | 7 行 (占位符) | Web 服务缺失 |
-| config/ | 407 行 | 577 行 | 已完成 |
-| util/ | 190 行 | 103 行 | 基本完成 |
-| main.rs | 317 行 | 65 行 | 需完善 |
+| bridge/ | 4,530 行 | ~2,500 行 | ✅ 基本完成 |
+| dingtalk 客户端 | 2,909 行 | ~1,200 行 | ✅ 基本完成 |
+| formatter/ | 569 行 | ~200 行 | ✅ 基本完成 |
+| web/ | 1,296 行 | ~300 行 | ✅ 基本完成 |
+| config/ | 407 行 | 577 行 | ✅ 已完成 |
+| database/ | 1,810 行 | 0 行 | ❌ 需要重新实现 |
 
 ---
 
-## 第一阶段: 核心架构重构 (Phase 1)
+## ✅ 第一阶段: 核心架构重构 (已完成)
 
-### 1.1 项目结构调整
-- [ ] 创建 `src/dingtalk/mod.rs` 模块入口
-- [ ] 创建 `src/dingtalk/client.rs` - 钉钉 API 客户端
-- [ ] 创建 `src/dingtalk/service.rs` - 钉钉服务层
-- [ ] 创建 `src/dingtalk/types.rs` - 钉钉 API 类型定义
-- [ ] 创建 `src/bridge/mod.rs` 模块入口
-- [ ] 创建 `src/bridge/dingtalk_bridge.rs` - 主桥接器
-- [ ] 创建 `src/bridge/event_processor.rs` - Matrix 事件处理器
-- [ ] 创建 `src/bridge/message_flow.rs` - 消息流转
-- [ ] 创建 `src/bridge/portal.rs` - 门户房间管理
-- [ ] 创建 `src/bridge/puppet.rs` - 傀儡用户管理
-- [ ] 创建 `src/bridge/user.rs` - 用户管理
-- [ ] 创建 `src/bridge/command_handler.rs` - 命令处理
-- [ ] 创建 `src/bridge/presence_handler.rs` - 在线状态处理
-- [ ] 创建 `src/bridge/provisioning.rs` - 配置供应
-- [ ] 创建 `src/bridge/matrix_event_parser.rs` - Matrix 事件解析
-- [ ] 创建 `src/bridge/matrix_to_dingtalk_dispatcher.rs` - Matrix 到钉钉调度
-- [ ] 创建 `src/bridge/message.rs` - 消息类型定义
-- [ ] 创建 `src/formatter/mod.rs` - 格式转换模块入口
-- [ ] 创建 `src/formatter/dingtalk_to_matrix.rs` - 钉钉到 Matrix 格式转换
-- [ ] 创建 `src/formatter/matrix_to_dingtalk.rs` - Matrix 到钉钉格式转换
-- [ ] 创建 `src/web/mod.rs` - Web 模块入口
-- [ ] 创建 `src/web/health.rs` - 健康检查
-- [ ] 创建 `src/web/metrics.rs` - 指标收集
-- [ ] 创建 `src/web/provisioning.rs` - 配置 API
-- [ ] 创建 `src/lib.rs` - 库入口
+### 1.1 项目结构调整 ✅
+- [x] 创建 `src/dingtalk/mod.rs` 模块入口
+- [x] 创建 `src/dingtalk/client.rs` - 钉钉 API 客户端
+- [x] 创建 `src/dingtalk/service.rs` - 钉钉服务层
+- [x] 创建 `src/dingtalk/types.rs` - 钉钉 API 类型定义
+- [x] 创建 `src/bridge/mod.rs` 模块入口
+- [x] 创建 `src/bridge/dingtalk_bridge.rs` - 主桥接器
+- [x] 创建 `src/bridge/event_processor.rs` - Matrix 事件处理器
+- [x] 创建 `src/bridge/message_flow.rs` - 消息流转
+- [x] 创建 `src/bridge/portal.rs` - 门户房间管理
+- [x] 创建 `src/bridge/puppet.rs` - 傀儡用户管理
+- [x] 创建 `src/bridge/user.rs` - 用户管理
+- [x] 创建 `src/bridge/command_handler.rs` - 命令处理
+- [x] 创建 `src/bridge/presence_handler.rs` - 在线状态处理
+- [x] 创建 `src/bridge/provisioning.rs` - 配置供应
+- [x] 创建 `src/bridge/matrix_event_parser.rs` - Matrix 事件解析
+- [x] 创建 `src/bridge/matrix_to_dingtalk_dispatcher.rs` - Matrix 到钉钉调度
+- [x] 创建 `src/bridge/message.rs` - 消息类型定义
+- [x] 创建 `src/formatter/mod.rs` - 格式转换模块入口
+- [x] 创建 `src/formatter/dingtalk_to_matrix.rs` - 钉钉到 Matrix 格式转换
+- [x] 创建 `src/formatter/matrix_to_dingtalk.rs` - Matrix 到钉钉格式转换
+- [x] 创建 `src/web/mod.rs` - Web 模块入口
+- [x] 创建 `src/web/health.rs` - 健康检查
+- [x] 创建 `src/web/metrics.rs` - 指标收集
+- [x] 创建 `src/web/provisioning.rs` - 配置 API
+- [x] 创建 `src/lib.rs` - 库入口
 
-### 1.2 钉钉 API 类型定义 (src/dingtalk/types.rs)
-- [ ] 定义 `DingTalkUser` 结构体
-- [ ] 定义 `DingTalkChat` 结构体
-- [ ] 定义 `DingTalkMessage` 结构体
-- [ ] 定义 `DingTalkMessageType` 枚举
-- [ ] 定义 `DingTalkWebhookMessage` 结构体
-- [ ] 定义 `DingTalkResponse` 结构体
-- [ ] 定义 `DingTalkErrorResponse` 结构体
-
-### 1.3 Cargo.toml 依赖调整
-- [ ] 移除未使用的依赖 (hyper, diesel postgres/mysql features)
-- [ ] 添加 `lru` 依赖用于缓存
-- [ ] 精简 salvo features
+### 1.2 Cargo.toml 依赖调整 ✅
+- [x] 精简 salvo features
+- [x] 添加 `urlencoding` 依赖
+- [x] 添加 `lru` 依赖
 
 ---
 
-## 第二阶段: 钉钉客户端实现 (Phase 2)
+## 第二阶段: 数据库层实现 (进行中)
 
 ### 2.1 钉钉 Webhook 客户端 (src/dingtalk/client.rs)
 - [ ] 实现 `DingTalkClient` 结构体
