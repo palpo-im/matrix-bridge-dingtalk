@@ -41,15 +41,29 @@ impl DingTalkBridge {
         let webhook_url = std::env::var("DINGTALK_WEBHOOK_URL")
             .unwrap_or_else(|_| "https://oapi.dingtalk.com/robot/send".to_string());
         let access_token = std::env::var("DINGTALK_ACCESS_TOKEN")
-            .unwrap_or_else(|_| String::new());
-        let secret = std::env::var("DINGTALK_SECRET").ok();
-        let callback_token = std::env::var("DINGTALK_CALLBACK_TOKEN").ok();
+            .ok()
+            .or_else(|| config.auth.webhooks.values().next().cloned())
+            .unwrap_or_default();
+        let secret = std::env::var("DINGTALK_SECRET")
+            .ok()
+            .or_else(|| config.auth.security.secret.clone());
+        let callback_token = std::env::var("DINGTALK_CALLBACK_TOKEN")
+            .ok()
+            .or_else(|| {
+                if config.callback.token.is_empty() {
+                    None
+                } else {
+                    Some(config.callback.token.clone())
+                }
+            });
+        let webhook_tokens = config.auth.webhooks.clone();
 
         let dingtalk_service = Arc::new(DingTalkService::new(
             webhook_url,
             access_token,
             secret,
             callback_token,
+            webhook_tokens,
         ));
 
         let homeserver_url = Url::parse(&config.bridge.homeserver_url)?;

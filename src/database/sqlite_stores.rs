@@ -582,29 +582,62 @@ impl DeadLetterStore for SqliteDeadLetterStore {
     async fn cleanup_dead_letters(&self, status: Option<&str>, older_than_hours: Option<i64>, limit: i64) -> DatabaseResult<u64> {
         let pool = self.pool.clone();
         let status = status.map(|s| s.to_string());
+        let older_than = older_than_hours.map(|hours| {
+            (Utc::now() - chrono::Duration::hours(hours.max(0)))
+                .format("%Y-%m-%d %H:%M:%S")
+                .to_string()
+        });
+        let limit = limit.max(1);
         
         tokio::task::spawn_blocking(move || {
             let mut conn = get_conn(&pool)?;
-            let query = if let (Some(status), Some(hours)) = (&status, older_than_hours) {
-                format!(
-                    "DELETE FROM dead_letters WHERE status = '{}' AND created_at < datetime('now', '-{} hours') LIMIT {}",
-                    status, hours, limit
+
+            let affected = match (status.as_ref(), older_than.as_ref()) {
+                (Some(status), Some(older_than)) => diesel::sql_query(
+                    "DELETE FROM dead_letters WHERE id IN (
+                        SELECT id FROM dead_letters
+                        WHERE status = ? AND created_at < ?
+                        ORDER BY id ASC
+                        LIMIT ?
+                    )",
                 )
-            } else if let Some(status) = &status {
-                format!(
-                    "DELETE FROM dead_letters WHERE status = '{}' LIMIT {}",
-                    status, limit
+                .bind::<sql_types::Text, _>(status)
+                .bind::<sql_types::Text, _>(older_than)
+                .bind::<sql_types::BigInt, _>(&limit)
+                .execute(&mut conn)?,
+                (Some(status), None) => diesel::sql_query(
+                    "DELETE FROM dead_letters WHERE id IN (
+                        SELECT id FROM dead_letters
+                        WHERE status = ?
+                        ORDER BY id ASC
+                        LIMIT ?
+                    )",
                 )
-            } else if let Some(hours) = older_than_hours {
-                format!(
-                    "DELETE FROM dead_letters WHERE created_at < datetime('now', '-{} hours') LIMIT {}",
-                    hours, limit
+                .bind::<sql_types::Text, _>(status)
+                .bind::<sql_types::BigInt, _>(&limit)
+                .execute(&mut conn)?,
+                (None, Some(older_than)) => diesel::sql_query(
+                    "DELETE FROM dead_letters WHERE id IN (
+                        SELECT id FROM dead_letters
+                        WHERE created_at < ?
+                        ORDER BY id ASC
+                        LIMIT ?
+                    )",
                 )
-            } else {
-                format!("DELETE FROM dead_letters LIMIT {}", limit)
+                .bind::<sql_types::Text, _>(older_than)
+                .bind::<sql_types::BigInt, _>(&limit)
+                .execute(&mut conn)?,
+                (None, None) => diesel::sql_query(
+                    "DELETE FROM dead_letters WHERE id IN (
+                        SELECT id FROM dead_letters
+                        ORDER BY id ASC
+                        LIMIT ?
+                    )",
+                )
+                .bind::<sql_types::BigInt, _>(&limit)
+                .execute(&mut conn)?,
             };
-            
-            let affected = diesel::sql_query(&query).execute(&mut conn)?;
+
             Ok(affected as u64)
         }).await.map_err(|e| DatabaseError::Query(e.to_string()))?
     }

@@ -3,10 +3,10 @@ use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD;
 use hmac::{Hmac, Mac};
 use reqwest::Client;
-use serde::de::DeserializeOwned;
 use sha2::Sha256;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tracing::{debug, warn};
+use url::Url;
 
 use super::types::*;
 
@@ -43,6 +43,19 @@ impl DingTalkClient {
         }
     }
 
+    pub fn from_webhook_url(webhook_url: String, secret: Option<String>) -> Self {
+        let access_token = Url::parse(&webhook_url)
+            .ok()
+            .and_then(|url| {
+                url.query_pairs()
+                    .find(|(key, _)| key == "access_token")
+                    .map(|(_, value)| value.into_owned())
+            })
+            .unwrap_or_default();
+
+        Self::new(webhook_url, access_token, secret)
+    }
+
     pub fn with_max_retries(mut self, max_retries: u32) -> Self {
         self.max_retries = max_retries;
         self
@@ -54,27 +67,36 @@ impl DingTalkClient {
     }
 
     fn build_signed_url(&self) -> String {
-        let mut url = format!("{}?access_token={}", self.webhook_url, self.access_token);
+        let mut url = match Url::parse(&self.webhook_url) {
+            Ok(url) => url,
+            Err(_) => return self.webhook_url.clone(),
+        };
+
+        let has_access_token = url.query_pairs().any(|(key, _)| key == "access_token");
+        if !has_access_token && !self.access_token.is_empty() {
+            url.query_pairs_mut()
+                .append_pair("access_token", &self.access_token);
+        }
 
         if let Some(secret) = &self.secret {
             let timestamp = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_millis();
-
+                .unwrap_or_default()
+                .as_millis()
+                .to_string();
             let string_to_sign = format!("{}\n{}", timestamp, secret);
 
-            let mut mac = HmacSha256::new_from_slice(secret.as_bytes())
-                .expect("HMAC can take key of any size");
+            let mut mac =
+                HmacSha256::new_from_slice(secret.as_bytes()).expect("invalid hmac key size");
             mac.update(string_to_sign.as_bytes());
-            let result = mac.finalize();
-            let signature = STANDARD.encode(result.into_bytes());
+            let signature = STANDARD.encode(mac.finalize().into_bytes());
 
-            url = format!("{}&timestamp={}&sign={}", url, timestamp, 
-                urlencoding::encode(&signature));
+            url.query_pairs_mut()
+                .append_pair("timestamp", &timestamp)
+                .append_pair("sign", &signature);
         }
 
-        url
+        url.to_string()
     }
 
     pub async fn send_text(
