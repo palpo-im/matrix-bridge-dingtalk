@@ -74,6 +74,6 @@
 
 ## 阶段提交记录
 - [x] Phase 1 提交: `05e229b`
-- [ ] Phase 2 提交: `TBD`
+- [x] Phase 2 提交: `dafe984`
 - [ ] Phase 3 提交: `TBD`
 - [ ] Phase 4 提交: `TBD`
