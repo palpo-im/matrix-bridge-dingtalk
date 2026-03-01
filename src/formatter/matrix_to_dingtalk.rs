@@ -1,3 +1,4 @@
+#[derive(Clone)]
 pub struct MatrixToDingTalkFormatter {
     max_text_length: usize,
 }

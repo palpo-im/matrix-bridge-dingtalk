@@ -6,11 +6,13 @@ use anyhow::Context;
 use chrono::Utc;
 use matrix_bot_sdk::appservice::{Appservice, AppserviceHandler, Intent};
 use matrix_bot_sdk::client::{MatrixAuth, MatrixClient};
+use salvo::prelude::Router;
 use serde_json::Value;
 use tokio::sync::RwLock;
 use tracing::{error, info, warn};
 use url::Url;
 
+use super::matrix_event_parser::{MatrixEvent, MatrixEventParser, ParsedEvent};
 use super::portal::{BridgePortal, PortalManager, RoomType};
 use super::puppet::{BridgePuppet, PuppetManager};
 use super::user::{BridgeUser, UserSyncPolicy};
@@ -21,6 +23,7 @@ use crate::database::{
     ProcessedEvent, RoomMapping, RoomStore, SqliteStores,
 };
 use crate::dingtalk::DingTalkService;
+use crate::formatter::{DingTalkToMatrixFormatter, MatrixToDingTalkFormatter};
 
 #[derive(Clone)]
 pub struct DingTalkBridge {
@@ -40,6 +43,10 @@ pub struct DingTalkBridge {
     command_handler: Arc<MatrixCommandHandler>,
     provisioning: Arc<ProvisioningCoordinator>,
     presence_handler: Arc<PresenceHandler>,
+    matrix_event_parser: MatrixEventParser,
+    matrix_formatter: MatrixToDingTalkFormatter,
+    dingtalk_formatter: DingTalkToMatrixFormatter,
+    bot_user_id: String,
     started_at: Instant,
     user_sync_policy: UserSyncPolicy,
     user_last_synced_at: Arc<RwLock<HashMap<String, Instant>>>,
@@ -106,6 +113,9 @@ impl DingTalkBridge {
         let provisioning = Arc::new(ProvisioningCoordinator::new(300));
         let presence_handler = Arc::new(PresenceHandler::new(Some(50)));
         let user_sync_policy = UserSyncPolicy::default();
+        let matrix_event_parser = MatrixEventParser::new();
+        let matrix_formatter = MatrixToDingTalkFormatter::new();
+        let dingtalk_formatter = DingTalkToMatrixFormatter::new();
 
         Ok(Self {
             config,
@@ -124,6 +134,10 @@ impl DingTalkBridge {
             command_handler,
             provisioning,
             presence_handler,
+            matrix_event_parser,
+            matrix_formatter,
+            dingtalk_formatter,
+            bot_user_id: bot_mxid,
             started_at: Instant::now(),
             user_sync_policy,
             user_last_synced_at: Arc::new(RwLock::new(HashMap::new())),
@@ -161,6 +175,205 @@ impl DingTalkBridge {
 
     pub fn started_at(&self) -> Instant {
         self.started_at
+    }
+
+    pub fn appservice_router(self: Arc<Self>) -> Router {
+        let handler = Arc::new(BridgeHandler::new(self.clone()));
+        Appservice::new(
+            self.config.registration.homeserver_token.clone(),
+            self.config.registration.appservice_token.clone(),
+            self.appservice.client.clone(),
+        )
+        .with_appservice_id(&self.config.registration.bridge_id)
+        .with_protocols(["dingtalk"])
+        .with_handler(handler)
+        .router()
+    }
+
+    pub async fn handle_matrix_transaction(&self, body: &Value) -> anyhow::Result<()> {
+        let events = body
+            .get("events")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+
+        for raw_event in events {
+            if let Err(err) = self.process_matrix_event(raw_event.clone()).await {
+                let dedupe_key = raw_event
+                    .get("event_id")
+                    .and_then(Value::as_str)
+                    .map(|event_id| format!("matrix:{}", event_id))
+                    .unwrap_or_else(|| {
+                        format!(
+                            "matrix:fallback:{}",
+                            raw_event
+                                .get("origin_server_ts")
+                                .and_then(Value::as_i64)
+                                .unwrap_or_default()
+                        )
+                    });
+                let conversation_id = raw_event
+                    .get("room_id")
+                    .and_then(Value::as_str)
+                    .map(ToOwned::to_owned);
+                if let Err(record_err) = self
+                    .record_dead_letter(
+                        "matrix",
+                        "transaction_event",
+                        &dedupe_key,
+                        conversation_id,
+                        raw_event.clone(),
+                        &err.to_string(),
+                    )
+                    .await
+                {
+                    warn!("Failed to record Matrix dead-letter: {}", record_err);
+                }
+                warn!("Failed to process matrix event: {}", err);
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn process_matrix_event(&self, raw_event: Value) -> anyhow::Result<()> {
+        let event: MatrixEvent =
+            serde_json::from_value(raw_event).context("invalid matrix event payload")?;
+        let event_id = event.event_id.clone().unwrap_or_default();
+
+        if !event_id.is_empty() && self.is_event_processed(&event_id).await? {
+            return Ok(());
+        }
+
+        if event.event_type != "m.room.message" {
+            if !event_id.is_empty() {
+                self.mark_event_processed(&event_id, &event.event_type, "matrix")
+                    .await?;
+            }
+            return Ok(());
+        }
+
+        let room_id = event.room_id.clone().unwrap_or_default();
+        let sender = event.sender.clone().unwrap_or_default();
+
+        if room_id.is_empty() || sender.is_empty() {
+            anyhow::bail!("matrix event missing room_id or sender");
+        }
+
+        if sender == self.bot_user_id {
+            return Ok(());
+        }
+
+        let Some(mapping) = self.get_room_mapping_by_matrix(&room_id).await? else {
+            return Ok(());
+        };
+
+        let parsed = self.matrix_event_parser.parse(&event);
+        let (body, msg_type) = match parsed {
+            ParsedEvent::Message {
+                msgtype,
+                body,
+                formatted_body,
+            } => {
+                let body_source = formatted_body.as_deref().unwrap_or(&body);
+                let rendered = self.matrix_formatter.format_text(body_source, &sender);
+                (rendered, msgtype)
+            }
+            _ => return Ok(()),
+        };
+
+        self.dingtalk_service
+            .send_text_to_conversation(
+                Some(&mapping.dingtalk_conversation_id),
+                &body,
+                None,
+                None,
+                false,
+            )
+            .await
+            .with_context(|| {
+                format!(
+                    "send to dingtalk failed for conversation {}",
+                    mapping.dingtalk_conversation_id
+                )
+            })?;
+
+        if !event_id.is_empty() {
+            let message_mapping = MessageMapping::new(
+                event_id.clone(),
+                format!("matrix:{}", event_id),
+                room_id,
+                sender,
+                mapping.dingtalk_conversation_id.clone(),
+            )
+            .with_content_hash(Some(format!(
+                "{}:{}:{}",
+                mapping.dingtalk_conversation_id, msg_type, body
+            )));
+            let _ = self.save_message_mapping(&message_mapping).await;
+            self.mark_event_processed(&event_id, "m.room.message", "matrix")
+                .await?;
+        }
+
+        Ok(())
+    }
+
+    pub async fn forward_dingtalk_text(
+        &self,
+        conversation_id: &str,
+        sender_id: &str,
+        content: &str,
+        dingtalk_msg_id: Option<&str>,
+    ) -> anyhow::Result<String> {
+        let Some(mapping) = self.get_room_mapping_by_dingtalk(conversation_id).await? else {
+            anyhow::bail!(
+                "dingtalk conversation '{}' has no matrix mapping",
+                conversation_id
+            );
+        };
+
+        if let Some(msg_id) = dingtalk_msg_id {
+            if self.is_event_processed(msg_id).await? {
+                return Ok(String::new());
+            }
+        }
+
+        let matrix_body = self.dingtalk_formatter.format_text(content, sender_id);
+        let matrix_event_id = self
+            .bot_intent
+            .send_text(&mapping.matrix_room_id, &matrix_body)
+            .await
+            .with_context(|| {
+                format!(
+                    "send text to matrix room {} failed",
+                    mapping.matrix_room_id
+                )
+            })?;
+
+        let dingtalk_message_id = dingtalk_msg_id
+            .map(ToOwned::to_owned)
+            .unwrap_or_else(|| format!("dingtalk:{}:{}", conversation_id, matrix_event_id));
+
+        let message_mapping = MessageMapping::new(
+            matrix_event_id.clone(),
+            dingtalk_message_id.clone(),
+            mapping.matrix_room_id.clone(),
+            self.bot_user_id.clone(),
+            sender_id.to_string(),
+        )
+        .with_content_hash(Some(format!(
+            "{}:{}",
+            sender_id,
+            content
+        )));
+        let _ = self.save_message_mapping(&message_mapping).await;
+
+        if let Some(msg_id) = dingtalk_msg_id {
+            self.mark_event_processed(msg_id, "dingtalk.text", "dingtalk")
+                .await?;
+        }
+
+        Ok(matrix_event_id)
     }
 
     pub async fn bridge_room(
@@ -535,40 +748,6 @@ impl BridgeHandler {
 #[async_trait::async_trait]
 impl AppserviceHandler for BridgeHandler {
     async fn on_transaction(&self, _txn_id: &str, body: &Value) -> anyhow::Result<()> {
-        let events = body
-            .get("events")
-            .and_then(Value::as_array)
-            .cloned()
-            .unwrap_or_default();
-        let event_count = events.len();
-
-        for event in events {
-            let event_type = event
-                .get("type")
-                .and_then(Value::as_str)
-                .unwrap_or_default();
-
-            let room_id = event
-                .get("room_id")
-                .and_then(Value::as_str)
-                .unwrap_or_default();
-
-            let sender = event
-                .get("sender")
-                .and_then(Value::as_str)
-                .unwrap_or_default();
-
-            info!(
-                "Received event: type={}, room={}, sender={}",
-                event_type, room_id, sender
-            );
-        }
-
-        warn!(
-            "Matrix transaction received but processing pipeline is not enabled yet; event count={}.",
-            event_count
-        );
-
-        Ok(())
+        self.bridge.handle_matrix_transaction(body).await
     }
 }

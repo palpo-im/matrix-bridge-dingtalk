@@ -37,6 +37,7 @@ impl MatrixEvent {
     }
 }
 
+#[derive(Clone)]
 pub struct MatrixEventParser;
 
 impl MatrixEventParser {

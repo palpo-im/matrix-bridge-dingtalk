@@ -119,21 +119,33 @@ impl DingTalkResponse {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DingTalkWebhookMessage {
     #[serde(default)]
     pub msgtype: Option<String>,
     #[serde(default)]
     pub text: Option<DingTalkWebhookText>,
     #[serde(default)]
+    #[serde(alias = "senderId")]
     pub sender_id: Option<String>,
     #[serde(default)]
+    #[serde(alias = "conversationId")]
     pub conversation_id: Option<String>,
     #[serde(default)]
+    #[serde(alias = "createTime")]
     pub create_time: Option<i64>,
+    #[serde(default)]
+    #[serde(alias = "msgId")]
+    pub msg_id: Option<String>,
+    #[serde(default)]
+    #[serde(alias = "sessionWebhook")]
+    pub session_webhook: Option<String>,
+    #[serde(default)]
+    #[serde(alias = "chatbotUserId")]
+    pub chatbot_user_id: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DingTalkWebhookText {
     #[serde(default)]
     pub content: Option<String>,

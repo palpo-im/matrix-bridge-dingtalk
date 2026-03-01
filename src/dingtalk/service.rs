@@ -116,7 +116,7 @@ impl DingTalkService {
 
     async fn handle_text_message(
         &self,
-        _bridge: &Arc<DingTalkBridge>,
+        bridge: &Arc<DingTalkBridge>,
         content: &str,
         event: &DingTalkWebhookMessage,
     ) -> Result<()> {
@@ -130,7 +130,49 @@ impl DingTalkService {
             sender_id, conversation_id, content
         );
 
-        Ok(())
+        match bridge
+            .forward_dingtalk_text(
+                conversation_id,
+                sender_id,
+                content,
+                event.msg_id.as_deref(),
+            )
+            .await
+        {
+            Ok(matrix_event_id) => {
+                info!(
+                    "Forwarded DingTalk message to Matrix: dingtalk_conversation={} matrix_event_id={}",
+                    conversation_id, matrix_event_id
+                );
+                Ok(())
+            }
+            Err(err) => {
+                let dedupe_key = format!(
+                    "dingtalk:{}:{}",
+                    event.msg_id.as_deref().unwrap_or("unknown"),
+                    conversation_id
+                );
+                if let Ok(payload) = serde_json::to_value(event) {
+                    if let Err(record_err) = bridge
+                        .record_dead_letter(
+                            "dingtalk",
+                            "callback_text",
+                            &dedupe_key,
+                            Some(conversation_id.to_string()),
+                            payload,
+                            &err.to_string(),
+                        )
+                        .await
+                    {
+                        warn!(
+                            "Failed to record DingTalk callback dead-letter: {}",
+                            record_err
+                        );
+                    }
+                }
+                Err(err)
+            }
+        }
     }
 
     pub async fn send_text(

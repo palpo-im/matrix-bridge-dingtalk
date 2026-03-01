@@ -60,11 +60,11 @@
 - [x] 落地 read/write/delete/admin token 校验
 
 ### 第 3 阶段：双向桥接主链路
-- [ ] 挂载 Matrix Appservice router，接管 transaction
-- [ ] Matrix -> DingTalk：按 mapping 转发、去重、记录 processed/message mapping
-- [ ] DingTalk 回调路由与服务接入（token 校验 + 事件分发）
-- [ ] DingTalk -> Matrix：按 mapping 回发文本并记录 message mapping
-- [ ] 失败路径统一写入 dead-letter
+- [x] 挂载 Matrix Appservice router，接管 transaction
+- [x] Matrix -> DingTalk：按 mapping 转发、去重、记录 processed/message mapping
+- [x] DingTalk 回调路由与服务接入（token 校验 + 事件分发）
+- [x] DingTalk -> Matrix：按 mapping 回发文本并记录 message mapping
+- [x] 失败路径统一写入 dead-letter
 
 ### 第 4 阶段：测试与文档
 - [ ] 增加关键单测（签名 URL、回调字段解析、dead-letter cleanup、mapping API）

@@ -6,7 +6,7 @@ use clap::{Args as ClapArgs, Parser, Subcommand};
 use matrix_bridge_dingtalk::bridge::DingTalkBridge;
 use matrix_bridge_dingtalk::config::Config;
 use matrix_bridge_dingtalk::database::Database;
-use matrix_bridge_dingtalk::web::{health_endpoint, metrics_endpoint, ProvisioningApi};
+use matrix_bridge_dingtalk::web::{dingtalk_callback, health_endpoint, metrics_endpoint, ProvisioningApi};
 use reqwest::Client;
 use salvo::prelude::*;
 use serde_json::{Value, json};
@@ -195,17 +195,27 @@ async fn start_web_server(config: Config, bridge: Arc<DingTalkBridge>) {
     let admin_token = std::env::var("MATRIX_BRIDGE_DINGTALK_PROVISIONING_ADMIN_TOKEN").ok();
 
     let provisioning_api = ProvisioningApi::new(
-        bridge,
+        bridge.clone(),
         read_token,
         write_token,
         delete_token,
         admin_token,
     );
+    let appservice_router = bridge.clone().appservice_router();
 
-    let router = Router::new()
+    let mut router = Router::new()
+        .push(appservice_router)
         .push(Router::with_path("health").get(health_endpoint))
         .push(Router::with_path("metrics").get(metrics_endpoint))
         .push(Router::with_path("admin").push(provisioning_api.router()));
+
+    if config.callback.enabled {
+        router = router.push(
+            Router::with_path("dingtalk/callback")
+                .hoop(affix_state::inject(bridge.clone()))
+                .post(dingtalk_callback),
+        );
+    }
 
     let acceptor = TcpListener::new((bind_address, port)).bind().await;
     let service = Service::new(router);
