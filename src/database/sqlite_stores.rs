@@ -522,6 +522,30 @@ impl DeadLetterStore for SqliteDeadLetterStore {
         }).await.map_err(|e| DatabaseError::Query(e.to_string()))?
     }
 
+    async fn count_dead_letters(&self, status: Option<&str>) -> DatabaseResult<i64> {
+        let pool = self.pool.clone();
+        let status = status.map(|s| s.to_string());
+
+        tokio::task::spawn_blocking(move || {
+            let mut conn = get_conn(&pool)?;
+            let count: i64 = if let Some(status) = status {
+                diesel::sql_query(
+                    "SELECT COUNT(*) as count FROM dead_letters WHERE status = ?"
+                )
+                .bind::<sql_types::Text, _>(&status)
+                .get_result::<CountRow>(&mut conn)?
+                .count
+            } else {
+                diesel::sql_query("SELECT COUNT(*) as count FROM dead_letters")
+                    .get_result::<CountRow>(&mut conn)?
+                    .count
+            };
+            Ok(count)
+        })
+        .await
+        .map_err(|e| DatabaseError::Query(e.to_string()))?
+    }
+
     async fn list_dead_letters(&self, status: Option<&str>, limit: i64) -> DatabaseResult<Vec<DeadLetterEvent>> {
         let pool = self.pool.clone();
         let status = status.map(|s| s.to_string());

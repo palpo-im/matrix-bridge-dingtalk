@@ -54,10 +54,10 @@
 - [x] 修复 dead-letter cleanup 的 SQL 注入风险（参数化）
 
 ### 第 2 阶段：Admin/Provisioning 可用化
-- [ ] 接通数据库 stores 到 bridge
-- [ ] 实现 `/admin/status`、`/admin/mappings`、`/admin/bridge`、`/admin/unbridge`
-- [ ] 实现 dead-letter 查询/重放/清理接口并与 CLI 对齐
-- [ ] 落地 read/write/delete/admin token 校验
+- [x] 接通数据库 stores 到 bridge
+- [x] 实现 `/admin/status`、`/admin/mappings`、`/admin/bridge`、`/admin/unbridge`
+- [x] 实现 dead-letter 查询/重放/清理接口并与 CLI 对齐
+- [x] 落地 read/write/delete/admin token 校验
 
 ### 第 3 阶段：双向桥接主链路
 - [ ] 挂载 Matrix Appservice router，接管 transaction

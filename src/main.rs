@@ -97,6 +97,13 @@ struct DeadLetterCleanupCommand {
     target: AdminApiTarget,
 }
 
+#[derive(Debug, Clone, Copy)]
+enum TokenScope {
+    Read,
+    Write,
+    Delete,
+}
+
 const EXAMPLE_CONFIG: &str = include_str!("../config/config.sample.yaml");
 
 #[tokio::main]
@@ -132,26 +139,23 @@ async fn main() -> anyhow::Result<()> {
         env!("CARGO_PKG_VERSION")
     );
 
-    // Initialize database
-    let db = Database::connect(
-        "sqlite",
-        &config.database.connection_string(),
-        20,
-        2,
-    ).await.context("Failed to connect to database")?;
-    
-    db.run_migrations().await.context("Failed to run database migrations")?;
+    let db = Database::connect("sqlite", &config.database.connection_string(), 20, 2)
+        .await
+        .context("Failed to connect to database")?;
+
+    db.run_migrations()
+        .await
+        .context("Failed to run database migrations")?;
     info!("Database initialized successfully");
 
-    // Create bridge
-    let bridge = DingTalkBridge::new(config.clone()).await?;
+    let bridge = DingTalkBridge::new(config.clone(), db)
+        .await
+        .context("Failed to initialize bridge")?;
     let bridge = Arc::new(bridge);
 
-    // Start web server
     let web_server = start_web_server(config.clone(), bridge.clone());
     tokio::spawn(web_server);
 
-    // Start bridge
     let bridge_clone = bridge.clone();
     tokio::select! {
         result = bridge_clone.start() => {
@@ -176,146 +180,38 @@ async fn start_web_server(config: Config, bridge: Arc<DingTalkBridge>) {
     let bind_address: &'static str = Box::leak(config.bridge.bind_address.clone().into_boxed_str());
     let port = config.bridge.port;
 
+    let default_token = std::env::var("MATRIX_BRIDGE_DINGTALK_PROVISIONING_TOKEN")
+        .unwrap_or_else(|_| config.registration.appservice_token.clone());
+    let read_token = std::env::var("MATRIX_BRIDGE_DINGTALK_PROVISIONING_READ_TOKEN")
+        .ok()
+        .or_else(|| Some(default_token.clone()));
+    let write_token = std::env::var("MATRIX_BRIDGE_DINGTALK_PROVISIONING_WRITE_TOKEN")
+        .ok()
+        .or_else(|| Some(default_token.clone()));
+    let delete_token = std::env::var("MATRIX_BRIDGE_DINGTALK_PROVISIONING_DELETE_TOKEN")
+        .ok()
+        .or_else(|| std::env::var("MATRIX_BRIDGE_DINGTALK_PROVISIONING_ADMIN_TOKEN").ok())
+        .or_else(|| write_token.clone());
+    let admin_token = std::env::var("MATRIX_BRIDGE_DINGTALK_PROVISIONING_ADMIN_TOKEN").ok();
+
     let provisioning_api = ProvisioningApi::new(
         bridge,
-        std::env::var("PROVISIONING_READ_TOKEN").ok(),
-        std::env::var("PROVISIONING_WRITE_TOKEN").ok(),
-        std::env::var("PROVISIONING_ADMIN_TOKEN").ok(),
+        read_token,
+        write_token,
+        delete_token,
+        admin_token,
     );
 
     let router = Router::new()
-        .push(
-            Router::with_path("health")
-                .get(health_endpoint)
-        )
-        .push(
-            Router::with_path("metrics")
-                .get(metrics_endpoint)
-        )
-        .push(
-            Router::with_path("admin")
-                .push(Router::with_path("status").get(crate::web::get_status))
-                .push(Router::with_path("mappings").get(crate::web::mappings))
-                .push(Router::with_path("bridge").post(crate::web::bridge_room))
-                .hoop(affix_state::inject(provisioning_api))
-        );
+        .push(Router::with_path("health").get(health_endpoint))
+        .push(Router::with_path("metrics").get(metrics_endpoint))
+        .push(Router::with_path("admin").push(provisioning_api.router()));
 
     let acceptor = TcpListener::new((bind_address, port)).bind().await;
     let service = Service::new(router);
 
     info!("Web server listening on {}:{}", bind_address, port);
-    
     Server::new(acceptor).serve(service).await;
-}
-
-mod web {
-    use salvo::prelude::*;
-    use serde::{Deserialize, Serialize};
-    use super::ProvisioningApi;
-
-    #[derive(Debug, Serialize, Deserialize)]
-    pub struct BridgeStatus {
-        pub started_at: String,
-        pub uptime_secs: u64,
-        pub version: String,
-    }
-
-    #[handler]
-    pub async fn get_status(req: &mut Request, res: &mut Response, depot: &mut Depot) {
-        let api = depot.obtain::<ProvisioningApi>().cloned().unwrap();
-        let token = req.header::<String>("Authorization").map(|s| {
-            s.trim_start_matches("Bearer ").to_string()
-        });
-
-        if !api.validate_read_token(token.as_deref()) {
-            res.status_code(StatusCode::UNAUTHORIZED);
-            res.render(Json(serde_json::json!({
-                "error": "Unauthorized"
-            })));
-            return;
-        }
-
-        let bridge = api.bridge();
-        let started_at = bridge.started_at();
-        let uptime = started_at.elapsed().as_secs();
-
-        let resp = BridgeStatus {
-            started_at: chrono::Utc::now()
-                .checked_sub_signed(chrono::Duration::seconds(uptime as i64))
-                .unwrap()
-                .to_rfc3339(),
-            uptime_secs: uptime,
-            version: env!("CARGO_PKG_VERSION").to_string(),
-        };
-
-        res.render(Json(resp));
-    }
-
-    #[handler]
-    pub async fn mappings(req: &mut Request, res: &mut Response, depot: &mut Depot) {
-        let api = depot.obtain::<ProvisioningApi>().cloned().unwrap();
-        let token = req.header::<String>("Authorization").map(|s| {
-            s.trim_start_matches("Bearer ").to_string()
-        });
-
-        if !api.validate_read_token(token.as_deref()) {
-            res.status_code(StatusCode::UNAUTHORIZED);
-            res.render(Json(serde_json::json!({
-                "error": "Unauthorized"
-            })));
-            return;
-        }
-
-        let limit: i64 = req.query("limit").unwrap_or(100);
-        let offset: i64 = req.query("offset").unwrap_or(0);
-
-        res.render(Json(serde_json::json!({
-            "mappings": [],
-            "total": 0,
-            "limit": limit,
-            "offset": offset
-        })));
-    }
-
-    #[handler]
-    pub async fn bridge_room(req: &mut Request, res: &mut Response, depot: &mut Depot) {
-        let api = depot.obtain::<ProvisioningApi>().cloned().unwrap();
-        let token = req.header::<String>("Authorization").map(|s| {
-            s.trim_start_matches("Bearer ").to_string()
-        });
-
-        if !api.validate_write_token(token.as_deref()) {
-            res.status_code(StatusCode::UNAUTHORIZED);
-            res.render(Json(serde_json::json!({
-                "error": "Unauthorized"
-            })));
-            return;
-        }
-
-        #[derive(Deserialize)]
-        struct BridgeRequest {
-            matrix_room_id: String,
-            dingtalk_conversation_id: Option<String>,
-        }
-
-        let body: Result<BridgeRequest, _> = req.parse_json().await;
-
-        match body {
-            Ok(payload) => {
-                res.render(Json(serde_json::json!({
-                    "status": "pending",
-                    "matrix_room_id": payload.matrix_room_id,
-                    "dingtalk_conversation_id": payload.dingtalk_conversation_id
-                })));
-            }
-            Err(e) => {
-                res.status_code(StatusCode::BAD_REQUEST);
-                res.render(Json(serde_json::json!({
-                    "error": format!("Invalid request: {}", e)
-                })));
-            }
-        }
-    }
 }
 
 async fn run_management_command(command: Command, config: &Config) -> anyhow::Result<()> {
@@ -325,12 +221,12 @@ async fn run_management_command(command: Command, config: &Config) -> anyhow::Re
 
     match command {
         Command::Status(cmd) => {
-            let (base, token) = resolve_admin_access(config, &cmd.target);
+            let (base, token) = resolve_admin_access(config, &cmd.target, TokenScope::Read);
             let response = api_get(&client, &format!("{base}/status"), &token).await?;
             print_json(&response)?;
         }
         Command::Mappings(cmd) => {
-            let (base, token) = resolve_admin_access(config, &cmd.target);
+            let (base, token) = resolve_admin_access(config, &cmd.target, TokenScope::Read);
             let url = format!(
                 "{base}/mappings?limit={}&offset={}",
                 cmd.limit.max(1),
@@ -340,7 +236,7 @@ async fn run_management_command(command: Command, config: &Config) -> anyhow::Re
             print_json(&response)?;
         }
         Command::Replay(cmd) => {
-            let (base, token) = resolve_admin_access(config, &cmd.target);
+            let (base, token) = resolve_admin_access(config, &cmd.target, TokenScope::Write);
             let response = if let Some(id) = cmd.id {
                 api_post_json(
                     &client,
@@ -364,7 +260,7 @@ async fn run_management_command(command: Command, config: &Config) -> anyhow::Re
             print_json(&response)?;
         }
         Command::DeadLetterCleanup(cmd) => {
-            let (base, token) = resolve_admin_access(config, &cmd.target);
+            let (base, token) = resolve_admin_access(config, &cmd.target, TokenScope::Delete);
             let response = api_post_json(
                 &client,
                 &format!("{base}/dead-letters/cleanup"),
@@ -384,7 +280,11 @@ async fn run_management_command(command: Command, config: &Config) -> anyhow::Re
     Ok(())
 }
 
-fn resolve_admin_access(config: &Config, target: &AdminApiTarget) -> (String, String) {
+fn resolve_admin_access(
+    config: &Config,
+    target: &AdminApiTarget,
+    required_scope: TokenScope,
+) -> (String, String) {
     let base = target.admin_api.clone().unwrap_or_else(|| {
         format!(
             "http://{}:{}/admin",
@@ -395,10 +295,31 @@ fn resolve_admin_access(config: &Config, target: &AdminApiTarget) -> (String, St
     let token = target
         .token
         .clone()
-        .or_else(|| std::env::var("MATRIX_BRIDGE_DINGTALK_PROVISIONING_TOKEN").ok())
+        .or_else(|| env_token_for_scope(required_scope))
         .unwrap_or_else(|| config.registration.appservice_token.clone());
 
     (base.trim_end_matches('/').to_string(), token)
+}
+
+fn env_token_for_scope(scope: TokenScope) -> Option<String> {
+    match scope {
+        TokenScope::Read => std::env::var("MATRIX_BRIDGE_DINGTALK_PROVISIONING_READ_TOKEN")
+            .or_else(|_| std::env::var("MATRIX_BRIDGE_DINGTALK_PROVISIONING_WRITE_TOKEN"))
+            .or_else(|_| std::env::var("MATRIX_BRIDGE_DINGTALK_PROVISIONING_DELETE_TOKEN"))
+            .or_else(|_| std::env::var("MATRIX_BRIDGE_DINGTALK_PROVISIONING_ADMIN_TOKEN"))
+            .or_else(|_| std::env::var("MATRIX_BRIDGE_DINGTALK_PROVISIONING_TOKEN"))
+            .ok(),
+        TokenScope::Write => std::env::var("MATRIX_BRIDGE_DINGTALK_PROVISIONING_WRITE_TOKEN")
+            .or_else(|_| std::env::var("MATRIX_BRIDGE_DINGTALK_PROVISIONING_DELETE_TOKEN"))
+            .or_else(|_| std::env::var("MATRIX_BRIDGE_DINGTALK_PROVISIONING_ADMIN_TOKEN"))
+            .or_else(|_| std::env::var("MATRIX_BRIDGE_DINGTALK_PROVISIONING_TOKEN"))
+            .ok(),
+        TokenScope::Delete => std::env::var("MATRIX_BRIDGE_DINGTALK_PROVISIONING_DELETE_TOKEN")
+            .or_else(|_| std::env::var("MATRIX_BRIDGE_DINGTALK_PROVISIONING_ADMIN_TOKEN"))
+            .or_else(|_| std::env::var("MATRIX_BRIDGE_DINGTALK_PROVISIONING_WRITE_TOKEN"))
+            .or_else(|_| std::env::var("MATRIX_BRIDGE_DINGTALK_PROVISIONING_TOKEN"))
+            .ok(),
+    }
 }
 
 async fn api_get(client: &Client, url: &str, token: &str) -> anyhow::Result<Value> {

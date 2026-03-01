@@ -40,6 +40,7 @@ pub trait EventStore: Send + Sync {
 pub trait DeadLetterStore: Send + Sync {
     async fn insert_dead_letter(&self, event: &DeadLetterEvent) -> DatabaseResult<DeadLetterEvent>;
     async fn get_dead_letter(&self, id: i64) -> DatabaseResult<Option<DeadLetterEvent>>;
+    async fn count_dead_letters(&self, status: Option<&str>) -> DatabaseResult<i64>;
     async fn list_dead_letters(&self, status: Option<&str>, limit: i64) -> DatabaseResult<Vec<DeadLetterEvent>>;
     async fn update_dead_letter_status(&self, id: i64, status: &str) -> DatabaseResult<bool>;
     async fn delete_dead_letter(&self, id: i64) -> DatabaseResult<bool>;

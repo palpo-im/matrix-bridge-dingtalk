@@ -7,6 +7,7 @@ pub use error::{DatabaseError, DatabaseResult};
 pub use models::{
     DeadLetterEvent, MediaCacheEntry, MessageMapping, ProcessedEvent, RoomMapping, UserMapping,
 };
+pub use sqlite_stores::SqliteStores;
 pub use stores::{DeadLetterStore, EventStore, MediaStore, MessageStore, RoomStore, UserStore};
 
 use std::path::{Path, PathBuf};
@@ -97,6 +98,10 @@ impl Database {
 
     pub fn pool(&self) -> &SqlitePool {
         &self.pool
+    }
+
+    pub fn stores(&self) -> SqliteStores {
+        SqliteStores::new(self.pool.clone())
     }
 }
 
