@@ -221,25 +221,26 @@
 
 ---
 
-## ⏳ 第八阶段: 主程序完善 (进行中)
+## ✅ 第八阶段: 主程序完善 (已完成)
 
 ### 8.1 main.rs 完善
 - [x] 实现命令行参数解析 (Clap)
 - [x] 实现 `--generate-config` 选项
 - [x] 实现 `status` 子命令
 - [x] 实现 `mappings` 子命令
+- [x] 实现 `replay` 子命令
+- [x] 实现 `dead-letter-cleanup` 子命令
 - [x] 实现管理 API 调用
+- [x] 集成数据库初始化
+- [x] 集成 Web 服务器启动
 - [x] 实现优雅关闭
-- [ ] 集成数据库初始化
-- [ ] 集成 Web 服务器启动
 
 ### 8.2 配置示例
 - [x] 已有 `config/config.sample.yaml`
-- [ ] 创建 `example-config.yaml` (完整版)
 
 ---
 
-## 📋 第九阶段: 部署与文档 (待实现)
+## ✅ 第九阶段: 部署与文档 (待实现)
 
 ### 9.1 Docker 支持
 - [ ] 创建 `Dockerfile`
@@ -257,14 +258,32 @@
 
 ---
 
+## 当前状态
+
+### 代码量对比
+| 项目 | 代码行数 |
+|------|---------|
+| matrix-bridge-feishu | 11,779 行 |
+| matrix-bridge-dingtalk | 5,175 行 |
+
+### 已完成模块
+- ✅ bridge/ - 桥接核心
+- ✅ dingtalk/ - 钉钉客户端
+- ✅ formatter/ - 消息格式转换
+- ✅ web/ - Web API
+- ✅ database/ - 数据库层
+- ✅ config/ - 配置系统
+- ✅ utils/ - 工具模块
+- ✅ main.rs - 主程序
+
+---
+
 ## 实施进度
 
 ### ✅ 已完成
 - Sprint 1: 核心架构 - 提交: `626ab3b`
 - Sprint 2: 数据库层 - 提交: `92a4f31`
-
-### ⏳ 进行中
-- Sprint 3: 主程序集成
+- Sprint 3: 主程序集成 - 提交: `41850d5`
 
 ### 📋 待开始
 - Sprint 4: 部署文档
