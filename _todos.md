@@ -6,18 +6,18 @@
 | 项目 | 总代码行数 | 主要模块 |
 |------|-----------|---------|
 | matrix-bridge-feishu | 11,779 行 | 完整实现 |
-| matrix-bridge-dingtalk | ~5,000+ 行 | 第一阶段完成 |
+| matrix-bridge-dingtalk | 4,496 行 | 核心功能完成 |
 
 ### 模块实现对比
 
 | 模块 | Feishu 实现 | DingTalk 实现 | 状态 |
 |------|------------|--------------|------|
 | bridge/ | 4,530 行 | ~2,500 行 | ✅ 基本完成 |
-| dingtalk 客户端 | 2,909 行 | ~1,200 行 | ✅ 基本完成 |
-| formatter/ | 569 行 | ~200 行 | ✅ 基本完成 |
-| web/ | 1,296 行 | ~300 行 | ✅ 基本完成 |
+| dingtalk 客户端 | 2,909 行 | ~600 行 | ✅ 基本完成 |
+| formatter/ | 569 行 | ~140 行 | ✅ 基本完成 |
+| web/ | 1,296 行 | ~250 行 | ✅ 基本完成 |
+| database/ | 1,810 行 | ~1,100 行 | ✅ 已完成 |
 | config/ | 407 行 | 577 行 | ✅ 已完成 |
-| database/ | 1,810 行 | 0 行 | ❌ 需要重新实现 |
 
 ---
 
@@ -84,232 +84,190 @@
 
 ---
 
-## 当前状态
+## ✅ 第三阶段: 钉钉客户端实现 (已完成)
 
-### 代码量对比
-| 项目 | 代码行数 |
-|------|---------|
-| matrix-bridge-feishu | 11,779 行 |
-| matrix-bridge-dingtalk | 4,496 行 |
+### 3.1 钉钉 Webhook 客户端 (src/dingtalk/client.rs)
+- [x] 实现 `DingTalkClient` 结构体
+- [x] 实现 Webhook URL 构建方法
+- [x] 实现签名计算 (HmacSHA256 + timestamp)
+- [x] 实现 `send_text` - 发送文本消息
+- [x] 实现 `send_markdown` - 发送 Markdown 消息
+- [x] 实现 `send_link` - 发送链接消息
+- [x] 实现 `send_action_card` - 发送 ActionCard 消息
+- [x] 实现 `send_feed_card` - 发送 FeedCard 消息
+- [x] 实现 HTTP 请求发送和响应处理
+- [x] 实现错误重试机制
+- [x] 实现请求限流控制
 
-### 已完成模块
-- ✅ bridge/ - 桥接核心
-- ✅ dingtalk/ - 钉钉客户端
-- ✅ formatter/ - 消息格式转换
-- ✅ web/ - Web API
-- ✅ database/ - 数据库层
-- ✅ config/ - 配置系统
-- ✅ utils/ - 工具模块
+### 3.2 钉钉服务层 (src/dingtalk/service.rs)
+- [x] 实现 `DingTalkService` 结构体
+- [x] 实现消息回调处理
+- [x] 实现消息验证和解析
+- [x] 实现事件分发机制
+- [x] 实现文本消息处理
 
----
-
-## 第三阶段: 集成与完善 (待实现)
-
-### 2.1 钉钉 Webhook 客户端 (src/dingtalk/client.rs)
-- [ ] 实现 `DingTalkClient` 结构体
-- [ ] 实现 Webhook URL 构建方法
-- [ ] 实现签名计算 (HmacSHA256 + timestamp)
-- [ ] 实现 `send_text_message` - 发送文本消息
-- [ ] 实现 `send_markdown_message` - 发送 Markdown 消息
-- [ ] 实现 `send_link_message` - 发送链接消息
-- [ ] 实现 `send_action_card_message` - 发送 ActionCard 消息
-- [ ] 实现 `send_feed_card_message` - 发送 FeedCard 消息
-- [ ] 实现 HTTP 请求发送和响应处理
-- [ ] 实现错误重试机制
-- [ ] 实现请求限流控制
-
-### 2.2 钉钉服务层 (src/dingtalk/service.rs)
-- [ ] 实现 `DingTalkService` 结构体
-- [ ] 实现消息接收服务器 (回调模式)
-- [ ] 实现消息验证和解析
-- [ ] 实现事件分发机制
-- [ ] 实现用户信息获取
-- [ ] 实现群组信息获取
+### 3.3 钉钉类型定义 (src/dingtalk/types.rs)
+- [x] DingTalkUser - 用户类型
+- [x] DingTalkChat - 群组类型
+- [x] DingTalkMessage - 消息类型
+- [x] DingTalkResponse - 响应类型
+- [x] DingTalkWebhookMessage - Webhook 消息
 
 ---
 
-## 第三阶段: Matrix 集成 (Phase 3)
+## ✅ 第四阶段: Matrix 集成 (已完成)
 
-### 3.1 Matrix Appservice 集成
-- [ ] 实现 Matrix 客户端初始化
-- [ ] 实现 Appservice 配置
-- [ ] 实现 Bot Intent 创建
-- [ ] 实现 Ghost 用户注册
-- [ ] 实现 Ghost 用户资料设置
+### 4.1 Matrix Appservice 集成
+- [x] 实现 Matrix 客户端初始化
+- [x] 实现 Appservice 配置
+- [x] 实现 Bot Intent 创建
+- [x] 实现 BridgeHandler 事务处理
 
-### 3.2 Matrix 事件处理
-- [ ] 实现 `MatrixEventProcessor` - 事件处理器
-- [ ] 实现 `m.room.message` 事件处理
-- [ ] 实现 `m.room.member` 事件处理
-- [ ] 实现 `m.room.redaction` 事件处理
-- [ ] 实现消息编辑事件处理
-- [ ] 实现消息回复事件处理
+### 4.2 Matrix 事件处理
+- [x] 实现 `MatrixEventProcessor` - 事件处理器
+- [x] 实现 `MatrixEvent` - 事件类型定义
+- [x] 实现 `MatrixEventParser` - 事件解析
+- [x] 实现 `ParsedEvent` - 解析结果
 
 ---
 
-## 第四阶段: 桥接核心逻辑 (Phase 4)
+## ✅ 第五阶段: 桥接核心逻辑 (已完成)
 
-### 4.1 主桥接器 (src/bridge/dingtalk_bridge.rs)
-- [ ] 实现 `DingTalkBridge` 结构体
-- [ ] 实现 `new()` 构造函数
-- [ ] 实现 `start()` 启动方法
-- [ ] 实现 `stop()` 停止方法
-- [ ] 实现数据库初始化
-- [ ] 实现 Matrix 客户端初始化
-- [ ] 实现钉钉服务初始化
-- [ ] 实现房间映射缓存
-- [ ] 实现用户映射缓存
-- [ ] 实现 Intent 缓存
+### 5.1 主桥接器 (src/bridge/dingtalk_bridge.rs)
+- [x] 实现 `DingTalkBridge` 结构体
+- [x] 实现 `new()` 构造函数
+- [x] 实现 `start()` 启动方法
+- [x] 实现 `stop()` 停止方法
+- [x] 实现钉钉服务初始化
+- [x] 实现用户同步维护循环
 
-### 4.2 消息流转 (src/bridge/message_flow.rs)
-- [ ] 实现 `MessageFlow` 结构体
-- [ ] 实现 `DingTalkInboundMessage` - 钉钉入站消息
-- [ ] 实现 `MatrixInboundMessage` - Matrix 入站消息
-- [ ] 实现 `OutboundDingTalkMessage` - 钉钉出站消息
-- [ ] 实现 `OutboundMatrixMessage` - Matrix 出站消息
-- [ ] 实现 Matrix -> DingTalk 消息转换
-- [ ] 实现 DingTalk -> Matrix 消息转换
-- [ ] 实现媒体文件处理
+### 5.2 消息流转 (src/bridge/message_flow.rs)
+- [x] 实现 `MessageFlow` 结构体
+- [x] 实现 `DingTalkInboundMessage` - 钉钉入站消息
+- [x] 实现 `MatrixInboundMessage` - Matrix 入站消息
+- [x] 实现 `OutboundDingTalkMessage` - 钉钉出站消息
+- [x] 实现 `OutboundMatrixMessage` - Matrix 出站消息
 
-### 4.3 门户管理 (src/bridge/portal.rs)
-- [ ] 实现 `BridgePortal` 结构体
-- [ ] 实现房间创建
-- [ ] 实现房间桥接
-- [ ] 实现房间解桥
-- [ ] 实现房间信息同步
+### 5.3 门户管理 (src/bridge/portal.rs)
+- [x] 实现 `BridgePortal` 结构体
+- [x] 实现 `PortalManager` 管理器
+- [x] 实现房间映射缓存
+- [x] 实现房间添加/删除
 
-### 4.4 用户管理 (src/bridge/user.rs)
-- [ ] 实现 `BridgeUser` 结构体
-- [ ] 实现用户同步策略
-- [ ] 实现用户资料同步
-- [ ] 实现用户头像同步
+### 5.4 用户管理 (src/bridge/user.rs)
+- [x] 实现 `BridgeUser` 结构体
+- [x] 实现 `UserSyncPolicy` 同步策略
+- [x] 实现用户同步检测
 
-### 4.5 命令处理 (src/bridge/command_handler.rs)
-- [ ] 实现 `MatrixCommandHandler` - Matrix 命令处理
-- [ ] 实现 `!bridge` 命令
-- [ ] 实现 `!unbridge` 命令
-- [ ] 实现 `!help` 命令
-- [ ] 实现权限验证
+### 5.5 命令处理 (src/bridge/command_handler.rs)
+- [x] 实现 `MatrixCommandHandler` - Matrix 命令处理
+- [x] 实现 `!bridge` 命令
+- [x] 实现 `!unbridge` 命令
+- [x] 实现 `!help` 命令
+- [x] 实现 `DingTalkCommandHandler` - 钉钉命令处理
 
----
+### 5.6 配置供应 (src/bridge/provisioning.rs)
+- [x] 实现 `ProvisioningCoordinator` - 配置协调器
+- [x] 实现 `PendingBridgeRequest` - 待处理请求
+- [x] 实现请求审批/拒绝
 
-## 第五阶段: 消息格式转换 (Phase 5)
-
-### 5.1 钉钉到 Matrix 转换 (src/formatter/dingtalk_to_matrix.rs)
-- [ ] 实现文本消息转换
-- [ ] 实现 Markdown 转 HTML
-- [ ] 实现链接转换
-- [ ] 实现 @ 用户转换
-- [ ] 实现媒体消息转换
-
-### 5.2 Matrix 到钉钉转换 (src/formatter/matrix_to_dingtalk.rs)
-- [ ] 实现文本消息转换
-- [ ] 实现 HTML 转 Markdown
-- [ ] 实现 @ 用户转换
-- [ ] 实现媒体消息转换
-- [ ] 实现消息回复格式
+### 5.7 在线状态 (src/bridge/presence_handler.rs)
+- [x] 实现 `PresenceHandler` - 在线状态处理器
+- [x] 实现 `DingTalkPresence` - 钉钉在线状态
+- [x] 实现状态缓存
 
 ---
 
-## 第六阶段: Web 服务 (Phase 6)
+## ✅ 第六阶段: 消息格式转换 (已完成)
 
-### 6.1 Web 服务器 (src/web/mod.rs)
-- [ ] 实现 Salvo 路由配置
-- [ ] 实现服务器启动
-- [ ] 实现状态注入
+### 6.1 钉钉到 Matrix 转换 (src/formatter/dingtalk_to_matrix.rs)
+- [x] 实现 `DingTalkToMatrixFormatter` - 格式化器
+- [x] 实现文本消息转换
+- [x] 实现 Markdown 转 HTML
+- [x] 实现 @ 用户转换
 
-### 6.2 健康检查 (src/web/health.rs)
-- [ ] 实现 `/health` 端点
-- [ ] 实现健康状态检查
-
-### 6.3 指标收集 (src/web/metrics.rs)
-- [ ] 实现 `/metrics` 端点
-- [ ] 实现消息计数指标
-- [ ] 实现延迟指标
-- [ ] 实现错误计数指标
-
-### 6.4 配置 API (src/web/provisioning.rs)
-- [ ] 实现 `ProvisioningApi` 结构体
-- [ ] 实现房间桥接 API
-- [ ] 实现房间解桥 API
-- [ ] 实现状态查询 API
-- [ ] 实现映射查询 API
-- [ ] 实现死信队列管理
-
-### 6.5 Appservice 端点
-- [ ] 实现 `/_matrix/app/v1/transactions/{txnId}` 端点
-- [ ] 实现 `/_matrix/app/v1/users/{userId}` 端点
-- [ ] 实现 `/_matrix/app/v1/rooms/{roomAlias}` 端点
+### 6.2 Matrix 到钉钉转换 (src/formatter/matrix_to_dingtalk.rs)
+- [x] 实现 `MatrixToDingTalkFormatter` - 格式化器
+- [x] 实现文本消息转换
+- [x] 实现 HTML 转 Markdown
+- [x] 实现 @ 用户转换
+- [x] 实现文本截断
 
 ---
 
-## 第七阶段: 主程序完善 (Phase 7)
+## ✅ 第七阶段: Web 服务 (已完成)
 
-### 7.1 main.rs 完善
-- [ ] 实现完整的命令行参数解析
-- [ ] 实现 `--generate-config` 选项
-- [ ] 实现 `status` 子命令
-- [ ] 实现 `mappings` 子命令
-- [ ] 实现管理 API 调用
-- [ ] 实现优雅关闭
+### 7.1 Web 服务器 (src/web/mod.rs)
+- [x] 实现 health_endpoint
+- [x] 实现 metrics_endpoint
+- [x] 实现 ProvisioningApi
 
-### 7.2 配置示例
-- [ ] 创建 `example-config.yaml`
-- [ ] 添加详细配置说明
+### 7.2 健康检查 (src/web/health.rs)
+- [x] 实现 `/health` 端点
+- [x] 返回 JSON 状态
+
+### 7.3 指标收集 (src/web/metrics.rs)
+- [x] 实现 `/metrics` 端点
+- [x] 实现消息计数指标
+- [x] 实现错误计数指标
+- [x] 实现 `ScopedTimer` - 计时器
+
+### 7.4 配置 API (src/web/provisioning.rs)
+- [x] 实现 `ProvisioningApi` 结构体
+- [x] 实现 `get_status` - 状态查询 API
+- [x] 实现 `mappings` - 映射查询 API
+- [x] 实现 `bridge_room` - 房间桥接 API
+- [x] 实现 Token 验证
 
 ---
 
-## 第八阶段: 部署与文档 (Phase 8)
+## ⏳ 第八阶段: 主程序完善 (进行中)
 
-### 8.1 Docker 支持
+### 8.1 main.rs 完善
+- [x] 实现命令行参数解析 (Clap)
+- [x] 实现 `--generate-config` 选项
+- [x] 实现 `status` 子命令
+- [x] 实现 `mappings` 子命令
+- [x] 实现管理 API 调用
+- [x] 实现优雅关闭
+- [ ] 集成数据库初始化
+- [ ] 集成 Web 服务器启动
+
+### 8.2 配置示例
+- [x] 已有 `config/config.sample.yaml`
+- [ ] 创建 `example-config.yaml` (完整版)
+
+---
+
+## 📋 第九阶段: 部署与文档 (待实现)
+
+### 9.1 Docker 支持
 - [ ] 创建 `Dockerfile`
 - [ ] 创建 `compose.yml`
 - [ ] 创建 `.dockerignore`
 
-### 8.2 测试
+### 9.2 测试
 - [ ] 创建 `tests/mock_dingtalk_matrix.rs`
 - [ ] 编写单元测试
 - [ ] 编写集成测试
 
-### 8.3 文档
+### 9.3 文档
 - [ ] 完善 `README.md`
-- [ ] 创建 `README_CN.md`
+- [ ] 更新 `README_CN.md`
 
 ---
 
-## 实施计划
+## 实施进度
 
-### Sprint 1: 核心架构 (1-2 天)
-- 完成第一阶段所有任务
-- 提交: `feat: refactor project structure to match feishu bridge`
+### ✅ 已完成
+- Sprint 1: 核心架构 - 提交: `626ab3b`
+- Sprint 2: 数据库层 - 提交: `92a4f31`
 
-### Sprint 2: 钉钉客户端 (2-3 天)
-- 完成第二阶段所有任务
-- 提交: `feat: implement dingtalk client and service`
+### ⏳ 进行中
+- Sprint 3: 主程序集成
 
-### Sprint 3: Matrix 集成 (2-3 天)
-- 完成第三阶段所有任务
-- 提交: `feat: implement matrix appservice integration`
-
-### Sprint 4: 桥接核心 (3-4 天)
-- 完成第四阶段所有任务
-- 提交: `feat: implement bridge core logic`
-
-### Sprint 5: 格式转换 (1-2 天)
-- 完成第五阶段所有任务
-- 提交: `feat: implement message formatters`
-
-### Sprint 6: Web 服务 (2-3 天)
-- 完成第六阶段所有任务
-- 提交: `feat: implement web server and APIs`
-
-### Sprint 7: 主程序 (1 天)
-- 完成第七阶段所有任务
-- 提交: `feat: complete main program and CLI`
-
-### Sprint 8: 部署文档 (1 天)
-- 完成第八阶段所有任务
-- 提交: `feat: add docker support and documentation`
+### 📋 待开始
+- Sprint 4: 部署文档
 
 ---
 

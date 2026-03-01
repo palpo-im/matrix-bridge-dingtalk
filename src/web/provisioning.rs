@@ -3,7 +3,7 @@ use std::sync::Arc;
 use salvo::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use crate::bridge::{DingTalkBridge, ProvisioningCoordinator};
+use crate::bridge::DingTalkBridge;
 
 #[derive(Clone)]
 pub struct ProvisioningApi {
@@ -26,6 +26,10 @@ impl ProvisioningApi {
             write_token,
             admin_token,
         }
+    }
+
+    pub fn bridge(&self) -> &Arc<DingTalkBridge> {
+        &self.bridge
     }
 
     pub fn validate_read_token(&self, token: Option<&str>) -> bool {
