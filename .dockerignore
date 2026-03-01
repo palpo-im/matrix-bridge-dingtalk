@@ -1,0 +1,41 @@
+# Build artifacts
+target/
+*.pdb
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Git
+.git/
+.gitignore
+
+# Docker
+Dockerfile
+compose.yml
+.dockerignore
+
+# Documentation
+*.md
+!README.md
+
+# Test files
+tests/
+
+# CI/CD
+.github/
+
+# Data
+data/
+*.db
+*.db-shm
+*.db-wal
+
+# Logs
+*.log
+
+# Environment
+.env
+.env.*
