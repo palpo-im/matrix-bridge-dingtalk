@@ -5,9 +5,8 @@ use matrix_bridge_dingtalk::database::{Database, DeadLetterEvent};
 use tempfile::NamedTempFile;
 
 fn load_test_config(db_url: &str) -> Config {
-    let mut config: Config =
-        serde_yaml::from_str(include_str!("../config/config.sample.yaml"))
-            .expect("sample config should parse");
+    let mut config: Config = serde_yaml::from_str(include_str!("../config/config.sample.yaml"))
+        .expect("sample config should parse");
     config.database.url = Some(db_url.to_string());
     config.bridge.domain = "localhost".to_string();
     config.bridge.homeserver_url = "http://localhost:8008".to_string();
@@ -86,12 +85,14 @@ async fn bridge_room_mapping_crud_roundtrip() {
     db.run_migrations().await.expect("run migrations");
 
     let config = load_test_config(&db_url);
-    let bridge = DingTalkBridge::new(config, db)
-        .await
-        .expect("init bridge");
+    let bridge = DingTalkBridge::new(config, db).await.expect("init bridge");
 
     let mapping = bridge
-        .bridge_room("!room:test.local", "conv-test", Some("Bridge Test".to_string()))
+        .bridge_room(
+            "!room:test.local",
+            "conv-test",
+            Some("Bridge Test".to_string()),
+        )
         .await
         .expect("bridge room");
     assert_eq!(mapping.matrix_room_id, "!room:test.local");

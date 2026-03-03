@@ -51,18 +51,33 @@ impl ProvisioningApi {
     }
 
     pub fn validate_read_token(&self, token: Option<&str>) -> bool {
-        self.validate_token(token, [&self.read_token, &self.write_token, &self.delete_token, &self.admin_token])
+        self.validate_token(
+            token,
+            [
+                &self.read_token,
+                &self.write_token,
+                &self.delete_token,
+                &self.admin_token,
+            ],
+        )
     }
 
     pub fn validate_write_token(&self, token: Option<&str>) -> bool {
-        self.validate_token(token, [&self.write_token, &self.delete_token, &self.admin_token])
+        self.validate_token(
+            token,
+            [&self.write_token, &self.delete_token, &self.admin_token],
+        )
     }
 
     pub fn validate_delete_token(&self, token: Option<&str>) -> bool {
         self.validate_token(token, [&self.delete_token, &self.admin_token])
     }
 
-    fn validate_token<const N: usize>(&self, token: Option<&str>, expected: [&Option<String>; N]) -> bool {
+    fn validate_token<const N: usize>(
+        &self,
+        token: Option<&str>,
+        expected: [&Option<String>; N],
+    ) -> bool {
         let configured: Vec<&str> = expected
             .iter()
             .filter_map(|value| value.as_deref())
@@ -316,7 +331,11 @@ pub async fn list_dead_letters(req: &mut Request, res: &mut Response, depot: &mu
     let status = req.query::<String>("status");
     let limit = req.query::<i64>("limit").unwrap_or(100).max(1);
 
-    match api.bridge().list_dead_letters(status.as_deref(), limit).await {
+    match api
+        .bridge()
+        .list_dead_letters(status.as_deref(), limit)
+        .await
+    {
         Ok(dead_letters) => {
             res.render(Json(json!({
                 "dead_letters": dead_letters,
@@ -423,7 +442,11 @@ pub async fn cleanup_dead_letters(req: &mut Request, res: &mut Response, depot: 
 
     if dry_run {
         let cutoff = older_than_hours.map(|hours| Utc::now() - ChronoDuration::hours(hours.max(0)));
-        match api.bridge().list_dead_letters(status.as_deref(), limit).await {
+        match api
+            .bridge()
+            .list_dead_letters(status.as_deref(), limit)
+            .await
+        {
             Ok(dead_letters) => {
                 let filtered: Vec<_> = dead_letters
                     .into_iter()

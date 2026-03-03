@@ -8,7 +8,10 @@ use crate::bridge::DingTalkBridge;
 fn extract_callback_token(req: &Request) -> Option<String> {
     req.query::<String>("token")
         .or_else(|| req.header::<String>("X-Dingtalk-Token"))
-        .or_else(|| req.header::<String>("Authorization").map(|value| value.trim_start_matches("Bearer ").to_string()))
+        .or_else(|| {
+            req.header::<String>("Authorization")
+                .map(|value| value.trim_start_matches("Bearer ").to_string())
+        })
 }
 
 #[handler]

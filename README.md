@@ -14,6 +14,8 @@ Usable baseline implemented. Core bidirectional text bridge, admin provisioning 
 
 - Matrix Appservice transaction handling
 - Matrix -> DingTalk text forwarding (by persisted room mapping)
+- Matrix reply/edit/redaction handling (with policy switches)
+- Matrix bot auto-join on invite (`m.room.member` invite)
 - DingTalk callback -> Matrix text forwarding
 - Per-conversation DingTalk webhook routing (token or full webhook URL)
 - Dedup via `processed_events`
@@ -34,16 +36,16 @@ Usable baseline implemented. Core bidirectional text bridge, admin provisioning 
 1. Copy config:
 
 ```bash
-cp config/config.sample.yaml config.yaml
+cp config/config.example.yaml config.yaml
 ```
 
 2. Edit at least:
 - `bridge.domain`
 - `bridge.homeserver_url`
-- `database.url`
-- `registration.bridge_id`
-- `registration.appservice_token`
-- `registration.homeserver_token`
+- `database.uri` (or `database.url`)
+- `registration.id` (or `registration.bridge_id`)
+- `registration.as_token` (or `registration.appservice_token`)
+- `registration.hs_token` (or `registration.homeserver_token`)
 
 3. Optional env overrides:
 - `DINGTALK_WEBHOOK_URL`
@@ -75,6 +77,7 @@ Base URL: `http://<bind_address>:<port>/admin`
 
 - Focuses on text path first.
 - Rich media/event types are not fully bridged yet.
+- Callback security currently validates token only (no AES decrypt path yet).
 
 ## License
 

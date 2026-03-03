@@ -6,7 +6,9 @@ use clap::{Args as ClapArgs, Parser, Subcommand};
 use matrix_bridge_dingtalk::bridge::DingTalkBridge;
 use matrix_bridge_dingtalk::config::Config;
 use matrix_bridge_dingtalk::database::Database;
-use matrix_bridge_dingtalk::web::{dingtalk_callback, health_endpoint, metrics_endpoint, ProvisioningApi};
+use matrix_bridge_dingtalk::web::{
+    ProvisioningApi, dingtalk_callback, health_endpoint, metrics_endpoint,
+};
 use reqwest::Client;
 use salvo::prelude::*;
 use serde_json::{Value, json};
@@ -104,22 +106,22 @@ enum TokenScope {
     Delete,
 }
 
-const EXAMPLE_CONFIG: &str = include_str!("../config/config.sample.yaml");
+const EXAMPLE_CONFIG: &str = include_str!("../config/config.example.yaml");
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let args = CliArgs::parse();
+    let config_path = resolve_config_path(&args.config);
 
     if args.generate_config {
         println!("{}", EXAMPLE_CONFIG);
         return Ok(());
     }
 
-    let config_path = args.config.to_string_lossy().to_string();
     let config = Config::load_from_path(&config_path).with_context(|| {
         format!(
             "Failed to load config at '{}'; use --generate-config to print a template",
-            config_path
+            config_path.display()
         )
     })?;
 
@@ -139,9 +141,17 @@ async fn main() -> anyhow::Result<()> {
         env!("CARGO_PKG_VERSION")
     );
 
-    let db = Database::connect("sqlite", &config.database.connection_string(), 20, 2)
-        .await
-        .context("Failed to connect to database")?;
+    let db_uri = config.database.connection_string();
+    let db_max_open = config.database.max_connections().unwrap_or(20);
+    let db_max_idle = config.database.min_connections().unwrap_or(2);
+    let db = Database::connect(
+        config.database.db_type_name(),
+        &db_uri,
+        db_max_open,
+        db_max_idle,
+    )
+    .await
+    .context("Failed to connect to database")?;
 
     db.run_migrations()
         .await
@@ -309,6 +319,19 @@ fn resolve_admin_access(
         .unwrap_or_else(|| config.registration.appservice_token.clone());
 
     (base.trim_end_matches('/').to_string(), token)
+}
+
+fn resolve_config_path(cli_path: &std::path::Path) -> PathBuf {
+    let default = std::path::Path::new("config.yaml");
+    if cli_path == default {
+        if let Ok(path) = std::env::var("CONFIG_PATH") {
+            let trimmed = path.trim();
+            if !trimmed.is_empty() {
+                return PathBuf::from(trimmed);
+            }
+        }
+    }
+    cli_path.to_path_buf()
 }
 
 fn env_token_for_scope(scope: TokenScope) -> Option<String> {

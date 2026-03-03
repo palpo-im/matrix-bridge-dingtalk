@@ -14,6 +14,8 @@ use crate::bridge::DingTalkBridge;
 pub struct DingTalkService {
     default_client: DingTalkClient,
     conversation_clients: Arc<RwLock<HashMap<String, DingTalkClient>>>,
+    default_webhook_url: String,
+    default_secret: Option<String>,
     callback_token: Option<String>,
     bridge: Arc<RwLock<Option<Arc<DingTalkBridge>>>>,
 }
@@ -26,23 +28,23 @@ impl DingTalkService {
         callback_token: Option<String>,
         webhook_tokens: HashMap<String, String>,
     ) -> Self {
-        let default_client =
-            DingTalkClient::new(webhook_url.clone(), access_token, secret.clone());
+        let default_client = DingTalkClient::new(webhook_url.clone(), access_token, secret.clone());
         let mut conversation_clients = HashMap::new();
         for (conversation_id, webhook_value) in webhook_tokens {
-            let client = if webhook_value.starts_with("https://")
-                || webhook_value.starts_with("http://")
-            {
-                DingTalkClient::from_webhook_url(webhook_value, secret.clone())
-            } else {
-                DingTalkClient::new(webhook_url.clone(), webhook_value, secret.clone())
-            };
+            let client =
+                if webhook_value.starts_with("https://") || webhook_value.starts_with("http://") {
+                    DingTalkClient::from_webhook_url(webhook_value, secret.clone())
+                } else {
+                    DingTalkClient::new(webhook_url.clone(), webhook_value, secret.clone())
+                };
             conversation_clients.insert(conversation_id, client);
         }
 
         Self {
             default_client,
             conversation_clients: Arc::new(RwLock::new(conversation_clients)),
+            default_webhook_url: webhook_url,
+            default_secret: secret,
             callback_token,
             bridge: Arc::new(RwLock::new(None)),
         }
@@ -78,8 +80,8 @@ impl DingTalkService {
     pub async fn handle_callback(&self, body: &str) -> Result<Value> {
         debug!("Received DingTalk callback: {}", body);
 
-        let event: DingTalkWebhookMessage =
-            serde_json::from_str(body).map_err(|e| anyhow::anyhow!("Failed to parse callback: {}", e))?;
+        let event: DingTalkWebhookMessage = serde_json::from_str(body)
+            .map_err(|e| anyhow::anyhow!("Failed to parse callback: {}", e))?;
 
         self.process_event(event).await?;
 
@@ -88,10 +90,20 @@ impl DingTalkService {
 
     async fn process_event(&self, event: DingTalkWebhookMessage) -> Result<()> {
         let guard = self.bridge.read().await;
-        let bridge = guard.as_ref().ok_or_else(|| anyhow::anyhow!("Bridge not initialized"))?;
+        let bridge = guard
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("Bridge not initialized"))?;
 
         let msgtype = event.msgtype.as_deref().unwrap_or("unknown");
         let conversation_id = event.conversation_id.as_deref().unwrap_or("unknown");
+
+        if let (Some(conversation_id), Some(session_webhook)) = (
+            event.conversation_id.as_deref(),
+            event.session_webhook.as_deref(),
+        ) {
+            self.register_conversation_webhook(conversation_id, session_webhook)
+                .await;
+        }
 
         info!(
             "Processing DingTalk event: type={}, conversation={}",
@@ -114,6 +126,28 @@ impl DingTalkService {
         Ok(())
     }
 
+    async fn register_conversation_webhook(&self, conversation_id: &str, webhook_value: &str) {
+        let webhook_value = webhook_value.trim();
+        if webhook_value.is_empty() {
+            return;
+        }
+
+        let client = if webhook_value.starts_with("https://")
+            || webhook_value.starts_with("http://")
+        {
+            DingTalkClient::from_webhook_url(webhook_value.to_string(), self.default_secret.clone())
+        } else {
+            DingTalkClient::new(
+                self.default_webhook_url.clone(),
+                webhook_value.to_string(),
+                self.default_secret.clone(),
+            )
+        };
+
+        let mut guard = self.conversation_clients.write().await;
+        guard.insert(conversation_id.to_string(), client);
+    }
+
     async fn handle_text_message(
         &self,
         bridge: &Arc<DingTalkBridge>,
@@ -131,12 +165,7 @@ impl DingTalkService {
         );
 
         match bridge
-            .forward_dingtalk_text(
-                conversation_id,
-                sender_id,
-                content,
-                event.msg_id.as_deref(),
-            )
+            .forward_dingtalk_text(conversation_id, sender_id, content, event.msg_id.as_deref())
             .await
         {
             Ok(matrix_event_id) => {
@@ -208,15 +237,8 @@ impl DingTalkService {
         at_user_ids: Option<Vec<String>>,
         is_at_all: bool,
     ) -> Result<DingTalkResponse> {
-        self.send_markdown_to_conversation(
-            None,
-            title,
-            text,
-            at_mobiles,
-            at_user_ids,
-            is_at_all,
-        )
-        .await
+        self.send_markdown_to_conversation(None, title, text, at_mobiles, at_user_ids, is_at_all)
+            .await
     }
 
     pub async fn send_markdown_to_conversation(
@@ -254,9 +276,7 @@ impl DingTalkService {
         pic_url: Option<&str>,
     ) -> Result<DingTalkResponse> {
         let client = self.resolve_client(conversation_id).await;
-        client
-            .send_link(title, text, message_url, pic_url)
-            .await
+        client.send_link(title, text, message_url, pic_url).await
     }
 
     async fn resolve_client(&self, conversation_id: Option<&str>) -> DingTalkClient {

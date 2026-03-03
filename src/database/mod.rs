@@ -40,10 +40,7 @@ impl Database {
         let min_idle = Some(max_idle.min(max_size));
 
         if db_kind != "sqlite" {
-            anyhow::bail!(
-                "database type '{}' is not supported; use sqlite",
-                db_type
-            );
+            anyhow::bail!("database type '{}' is not supported; use sqlite", db_type);
         }
 
         let db_path = sqlite_path_from_uri(db_uri)?;

@@ -2,10 +2,12 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
-use diesel::{prelude::*, sqlite::SqliteConnection, sql_types};
 use diesel::r2d2::{ConnectionManager, Pool, PooledConnection};
+use diesel::{prelude::*, sql_types, sqlite::SqliteConnection};
 
-use super::models::{DeadLetterEvent, MediaCacheEntry, MessageMapping, ProcessedEvent, RoomMapping, UserMapping};
+use super::models::{
+    DeadLetterEvent, MediaCacheEntry, MessageMapping, ProcessedEvent, RoomMapping, UserMapping,
+};
 use super::stores::{DeadLetterStore, EventStore, MediaStore, MessageStore, RoomStore, UserStore};
 use super::{DatabaseError, DatabaseResult};
 
@@ -66,39 +68,46 @@ impl RoomStore for SqliteRoomStore {
     async fn get_room_mapping(&self, matrix_room_id: &str) -> DatabaseResult<Option<RoomMapping>> {
         let pool = self.pool.clone();
         let matrix_room_id = matrix_room_id.to_string();
-        
+
         tokio::task::spawn_blocking(move || {
             let mut conn = get_conn(&pool)?;
             let result: Option<RoomMappingRow> = diesel::sql_query(
                 "SELECT id, matrix_room_id, dingtalk_conversation_id, dingtalk_conversation_name, 
                         dingtalk_conversation_type, created_at, updated_at 
-                 FROM room_mappings WHERE matrix_room_id = ?"
+                 FROM room_mappings WHERE matrix_room_id = ?",
             )
             .bind::<sql_types::Text, _>(&matrix_room_id)
             .get_result(&mut conn)
             .optional()?;
-            
+
             Ok(result.map(|r| r.into_model()))
-        }).await.map_err(|e| DatabaseError::Query(e.to_string()))?
+        })
+        .await
+        .map_err(|e| DatabaseError::Query(e.to_string()))?
     }
 
-    async fn get_room_mapping_by_dingtalk(&self, dingtalk_conversation_id: &str) -> DatabaseResult<Option<RoomMapping>> {
+    async fn get_room_mapping_by_dingtalk(
+        &self,
+        dingtalk_conversation_id: &str,
+    ) -> DatabaseResult<Option<RoomMapping>> {
         let pool = self.pool.clone();
         let dingtalk_conversation_id = dingtalk_conversation_id.to_string();
-        
+
         tokio::task::spawn_blocking(move || {
             let mut conn = get_conn(&pool)?;
             let result: Option<RoomMappingRow> = diesel::sql_query(
                 "SELECT id, matrix_room_id, dingtalk_conversation_id, dingtalk_conversation_name, 
                         dingtalk_conversation_type, created_at, updated_at 
-                 FROM room_mappings WHERE dingtalk_conversation_id = ?"
+                 FROM room_mappings WHERE dingtalk_conversation_id = ?",
             )
             .bind::<sql_types::Text, _>(&dingtalk_conversation_id)
             .get_result(&mut conn)
             .optional()?;
-            
+
             Ok(result.map(|r| r.into_model()))
-        }).await.map_err(|e| DatabaseError::Query(e.to_string()))?
+        })
+        .await
+        .map_err(|e| DatabaseError::Query(e.to_string()))?
     }
 
     async fn insert_room_mapping(&self, mapping: &RoomMapping) -> DatabaseResult<RoomMapping> {
@@ -107,7 +116,7 @@ impl RoomStore for SqliteRoomStore {
         let dingtalk_conversation_id = mapping.dingtalk_conversation_id.clone();
         let dingtalk_conversation_name = mapping.dingtalk_conversation_name.clone();
         let dingtalk_conversation_type = mapping.dingtalk_conversation_type.clone();
-        
+
         tokio::task::spawn_blocking(move || {
             let mut conn = get_conn(&pool)?;
             diesel::sql_query(
@@ -139,32 +148,40 @@ impl RoomStore for SqliteRoomStore {
     async fn delete_room_mapping(&self, matrix_room_id: &str) -> DatabaseResult<bool> {
         let pool = self.pool.clone();
         let matrix_room_id = matrix_room_id.to_string();
-        
+
         tokio::task::spawn_blocking(move || {
             let mut conn = get_conn(&pool)?;
             let affected = diesel::sql_query("DELETE FROM room_mappings WHERE matrix_room_id = ?")
                 .bind::<sql_types::Text, _>(&matrix_room_id)
                 .execute(&mut conn)?;
             Ok(affected > 0)
-        }).await.map_err(|e| DatabaseError::Query(e.to_string()))?
+        })
+        .await
+        .map_err(|e| DatabaseError::Query(e.to_string()))?
     }
 
-    async fn list_room_mappings(&self, limit: i64, offset: i64) -> DatabaseResult<Vec<RoomMapping>> {
+    async fn list_room_mappings(
+        &self,
+        limit: i64,
+        offset: i64,
+    ) -> DatabaseResult<Vec<RoomMapping>> {
         let pool = self.pool.clone();
-        
+
         tokio::task::spawn_blocking(move || {
             let mut conn = get_conn(&pool)?;
             let results: Vec<RoomMappingRow> = diesel::sql_query(
                 "SELECT id, matrix_room_id, dingtalk_conversation_id, dingtalk_conversation_name, 
                         dingtalk_conversation_type, created_at, updated_at 
-                 FROM room_mappings ORDER BY created_at DESC LIMIT ? OFFSET ?"
+                 FROM room_mappings ORDER BY created_at DESC LIMIT ? OFFSET ?",
             )
             .bind::<sql_types::BigInt, _>(&limit)
             .bind::<sql_types::BigInt, _>(&offset)
             .get_results(&mut conn)?;
-            
+
             Ok(results.into_iter().map(|r| r.into_model()).collect())
-        }).await.map_err(|e| DatabaseError::Query(e.to_string()))?
+        })
+        .await
+        .map_err(|e| DatabaseError::Query(e.to_string()))?
     }
 }
 
@@ -183,7 +200,7 @@ impl UserStore for SqliteUserStore {
     async fn get_user_mapping(&self, matrix_user_id: &str) -> DatabaseResult<Option<UserMapping>> {
         let pool = self.pool.clone();
         let matrix_user_id = matrix_user_id.to_string();
-        
+
         tokio::task::spawn_blocking(move || {
             let mut conn = get_conn(&pool)?;
             let result: Option<UserMappingRow> = diesel::sql_query(
@@ -198,10 +215,13 @@ impl UserStore for SqliteUserStore {
         }).await.map_err(|e| DatabaseError::Query(e.to_string()))?
     }
 
-    async fn get_user_mapping_by_dingtalk(&self, dingtalk_user_id: &str) -> DatabaseResult<Option<UserMapping>> {
+    async fn get_user_mapping_by_dingtalk(
+        &self,
+        dingtalk_user_id: &str,
+    ) -> DatabaseResult<Option<UserMapping>> {
         let pool = self.pool.clone();
         let dingtalk_user_id = dingtalk_user_id.to_string();
-        
+
         tokio::task::spawn_blocking(move || {
             let mut conn = get_conn(&pool)?;
             let result: Option<UserMappingRow> = diesel::sql_query(
@@ -222,7 +242,7 @@ impl UserStore for SqliteUserStore {
         let dingtalk_user_id = mapping.dingtalk_user_id.clone();
         let dingtalk_username = mapping.dingtalk_username.clone();
         let dingtalk_avatar = mapping.dingtalk_avatar.clone();
-        
+
         tokio::task::spawn_blocking(move || {
             let mut conn = get_conn(&pool)?;
             diesel::sql_query(
@@ -256,7 +276,7 @@ impl UserStore for SqliteUserStore {
         let matrix_user_id = mapping.matrix_user_id.clone();
         let dingtalk_username = mapping.dingtalk_username.clone();
         let dingtalk_avatar = mapping.dingtalk_avatar.clone();
-        
+
         tokio::task::spawn_blocking(move || {
             let mut conn = get_conn(&pool)?;
             let affected = diesel::sql_query(
@@ -274,14 +294,16 @@ impl UserStore for SqliteUserStore {
     async fn delete_user_mapping(&self, matrix_user_id: &str) -> DatabaseResult<bool> {
         let pool = self.pool.clone();
         let matrix_user_id = matrix_user_id.to_string();
-        
+
         tokio::task::spawn_blocking(move || {
             let mut conn = get_conn(&pool)?;
             let affected = diesel::sql_query("DELETE FROM user_mappings WHERE matrix_user_id = ?")
                 .bind::<sql_types::Text, _>(&matrix_user_id)
                 .execute(&mut conn)?;
             Ok(affected > 0)
-        }).await.map_err(|e| DatabaseError::Query(e.to_string()))?
+        })
+        .await
+        .map_err(|e| DatabaseError::Query(e.to_string()))?
     }
 }
 
@@ -297,10 +319,13 @@ impl SqliteMessageStore {
 
 #[async_trait]
 impl MessageStore for SqliteMessageStore {
-    async fn get_message_mapping(&self, matrix_event_id: &str) -> DatabaseResult<Option<MessageMapping>> {
+    async fn get_message_mapping(
+        &self,
+        matrix_event_id: &str,
+    ) -> DatabaseResult<Option<MessageMapping>> {
         let pool = self.pool.clone();
         let matrix_event_id = matrix_event_id.to_string();
-        
+
         tokio::task::spawn_blocking(move || {
             let mut conn = get_conn(&pool)?;
             let result: Option<MessageMappingRow> = diesel::sql_query(
@@ -315,10 +340,13 @@ impl MessageStore for SqliteMessageStore {
         }).await.map_err(|e| DatabaseError::Query(e.to_string()))?
     }
 
-    async fn get_message_mapping_by_dingtalk(&self, dingtalk_message_id: &str) -> DatabaseResult<Option<MessageMapping>> {
+    async fn get_message_mapping_by_dingtalk(
+        &self,
+        dingtalk_message_id: &str,
+    ) -> DatabaseResult<Option<MessageMapping>> {
         let pool = self.pool.clone();
         let dingtalk_message_id = dingtalk_message_id.to_string();
-        
+
         tokio::task::spawn_blocking(move || {
             let mut conn = get_conn(&pool)?;
             let result: Option<MessageMappingRow> = diesel::sql_query(
@@ -333,7 +361,10 @@ impl MessageStore for SqliteMessageStore {
         }).await.map_err(|e| DatabaseError::Query(e.to_string()))?
     }
 
-    async fn insert_message_mapping(&self, mapping: &MessageMapping) -> DatabaseResult<MessageMapping> {
+    async fn insert_message_mapping(
+        &self,
+        mapping: &MessageMapping,
+    ) -> DatabaseResult<MessageMapping> {
         let pool = self.pool.clone();
         let matrix_event_id = mapping.matrix_event_id.clone();
         let dingtalk_message_id = mapping.dingtalk_message_id.clone();
@@ -341,7 +372,7 @@ impl MessageStore for SqliteMessageStore {
         let sender_mxid = mapping.sender_mxid.clone();
         let sender_dingtalk_id = mapping.sender_dingtalk_id.clone();
         let content_hash = mapping.content_hash.clone();
-        
+
         tokio::task::spawn_blocking(move || {
             let mut conn = get_conn(&pool)?;
             diesel::sql_query(
@@ -376,14 +407,17 @@ impl MessageStore for SqliteMessageStore {
     async fn delete_message_mapping(&self, matrix_event_id: &str) -> DatabaseResult<bool> {
         let pool = self.pool.clone();
         let matrix_event_id = matrix_event_id.to_string();
-        
+
         tokio::task::spawn_blocking(move || {
             let mut conn = get_conn(&pool)?;
-            let affected = diesel::sql_query("DELETE FROM message_mappings WHERE matrix_event_id = ?")
-                .bind::<sql_types::Text, _>(&matrix_event_id)
-                .execute(&mut conn)?;
+            let affected =
+                diesel::sql_query("DELETE FROM message_mappings WHERE matrix_event_id = ?")
+                    .bind::<sql_types::Text, _>(&matrix_event_id)
+                    .execute(&mut conn)?;
             Ok(affected > 0)
-        }).await.map_err(|e| DatabaseError::Query(e.to_string()))?
+        })
+        .await
+        .map_err(|e| DatabaseError::Query(e.to_string()))?
     }
 }
 
@@ -402,15 +436,19 @@ impl EventStore for SqliteEventStore {
     async fn is_event_processed(&self, event_id: &str) -> DatabaseResult<bool> {
         let pool = self.pool.clone();
         let event_id = event_id.to_string();
-        
+
         tokio::task::spawn_blocking(move || {
             let mut conn = get_conn(&pool)?;
-            let count: i64 = diesel::sql_query("SELECT COUNT(*) as count FROM processed_events WHERE event_id = ?")
-                .bind::<sql_types::Text, _>(&event_id)
-                .get_result::<CountRow>(&mut conn)?
-                .count;
+            let count: i64 = diesel::sql_query(
+                "SELECT COUNT(*) as count FROM processed_events WHERE event_id = ?",
+            )
+            .bind::<sql_types::Text, _>(&event_id)
+            .get_result::<CountRow>(&mut conn)?
+            .count;
             Ok(count > 0)
-        }).await.map_err(|e| DatabaseError::Query(e.to_string()))?
+        })
+        .await
+        .map_err(|e| DatabaseError::Query(e.to_string()))?
     }
 
     async fn mark_event_processed(&self, event: &ProcessedEvent) -> DatabaseResult<()> {
@@ -418,7 +456,7 @@ impl EventStore for SqliteEventStore {
         let event_id = event.event_id.clone();
         let event_type = event.event_type.clone();
         let source = event.source.clone();
-        
+
         tokio::task::spawn_blocking(move || {
             let mut conn = get_conn(&pool)?;
             diesel::sql_query(
@@ -435,14 +473,16 @@ impl EventStore for SqliteEventStore {
     async fn cleanup_old_events(&self, before: DateTime<Utc>) -> DatabaseResult<u64> {
         let pool = self.pool.clone();
         let before_str = before.to_rfc3339();
-        
+
         tokio::task::spawn_blocking(move || {
             let mut conn = get_conn(&pool)?;
             let affected = diesel::sql_query("DELETE FROM processed_events WHERE processed_at < ?")
                 .bind::<sql_types::Text, _>(&before_str)
                 .execute(&mut conn)?;
             Ok(affected as u64)
-        }).await.map_err(|e| DatabaseError::Query(e.to_string()))?
+        })
+        .await
+        .map_err(|e| DatabaseError::Query(e.to_string()))?
     }
 }
 
@@ -467,7 +507,7 @@ impl DeadLetterStore for SqliteDeadLetterStore {
         let payload = event.payload.clone();
         let error = event.error.clone();
         let status = event.status.clone();
-        
+
         tokio::task::spawn_blocking(move || {
             let mut conn = get_conn(&pool)?;
             diesel::sql_query(
@@ -506,7 +546,7 @@ impl DeadLetterStore for SqliteDeadLetterStore {
 
     async fn get_dead_letter(&self, id: i64) -> DatabaseResult<Option<DeadLetterEvent>> {
         let pool = self.pool.clone();
-        
+
         tokio::task::spawn_blocking(move || {
             let mut conn = get_conn(&pool)?;
             let result: Option<DeadLetterEventRow> = diesel::sql_query(
@@ -529,12 +569,10 @@ impl DeadLetterStore for SqliteDeadLetterStore {
         tokio::task::spawn_blocking(move || {
             let mut conn = get_conn(&pool)?;
             let count: i64 = if let Some(status) = status {
-                diesel::sql_query(
-                    "SELECT COUNT(*) as count FROM dead_letters WHERE status = ?"
-                )
-                .bind::<sql_types::Text, _>(&status)
-                .get_result::<CountRow>(&mut conn)?
-                .count
+                diesel::sql_query("SELECT COUNT(*) as count FROM dead_letters WHERE status = ?")
+                    .bind::<sql_types::Text, _>(&status)
+                    .get_result::<CountRow>(&mut conn)?
+                    .count
             } else {
                 diesel::sql_query("SELECT COUNT(*) as count FROM dead_letters")
                     .get_result::<CountRow>(&mut conn)?
@@ -546,10 +584,14 @@ impl DeadLetterStore for SqliteDeadLetterStore {
         .map_err(|e| DatabaseError::Query(e.to_string()))?
     }
 
-    async fn list_dead_letters(&self, status: Option<&str>, limit: i64) -> DatabaseResult<Vec<DeadLetterEvent>> {
+    async fn list_dead_letters(
+        &self,
+        status: Option<&str>,
+        limit: i64,
+    ) -> DatabaseResult<Vec<DeadLetterEvent>> {
         let pool = self.pool.clone();
         let status = status.map(|s| s.to_string());
-        
+
         tokio::task::spawn_blocking(move || {
             let mut conn = get_conn(&pool)?;
             let results: Vec<DeadLetterEventRow> = if let Some(status) = status {
@@ -578,32 +620,41 @@ impl DeadLetterStore for SqliteDeadLetterStore {
     async fn update_dead_letter_status(&self, id: i64, status: &str) -> DatabaseResult<bool> {
         let pool = self.pool.clone();
         let status = status.to_string();
-        
+
         tokio::task::spawn_blocking(move || {
             let mut conn = get_conn(&pool)?;
             let affected = diesel::sql_query(
-                "UPDATE dead_letters SET status = ?, updated_at = datetime('now') WHERE id = ?"
+                "UPDATE dead_letters SET status = ?, updated_at = datetime('now') WHERE id = ?",
             )
             .bind::<sql_types::Text, _>(&status)
             .bind::<sql_types::BigInt, _>(&id)
             .execute(&mut conn)?;
             Ok(affected > 0)
-        }).await.map_err(|e| DatabaseError::Query(e.to_string()))?
+        })
+        .await
+        .map_err(|e| DatabaseError::Query(e.to_string()))?
     }
 
     async fn delete_dead_letter(&self, id: i64) -> DatabaseResult<bool> {
         let pool = self.pool.clone();
-        
+
         tokio::task::spawn_blocking(move || {
             let mut conn = get_conn(&pool)?;
             let affected = diesel::sql_query("DELETE FROM dead_letters WHERE id = ?")
                 .bind::<sql_types::BigInt, _>(&id)
                 .execute(&mut conn)?;
             Ok(affected > 0)
-        }).await.map_err(|e| DatabaseError::Query(e.to_string()))?
+        })
+        .await
+        .map_err(|e| DatabaseError::Query(e.to_string()))?
     }
 
-    async fn cleanup_dead_letters(&self, status: Option<&str>, older_than_hours: Option<i64>, limit: i64) -> DatabaseResult<u64> {
+    async fn cleanup_dead_letters(
+        &self,
+        status: Option<&str>,
+        older_than_hours: Option<i64>,
+        limit: i64,
+    ) -> DatabaseResult<u64> {
         let pool = self.pool.clone();
         let status = status.map(|s| s.to_string());
         let older_than = older_than_hours.map(|hours| {
@@ -612,7 +663,7 @@ impl DeadLetterStore for SqliteDeadLetterStore {
                 .to_string()
         });
         let limit = limit.max(1);
-        
+
         tokio::task::spawn_blocking(move || {
             let mut conn = get_conn(&pool)?;
 
@@ -663,7 +714,9 @@ impl DeadLetterStore for SqliteDeadLetterStore {
             };
 
             Ok(affected as u64)
-        }).await.map_err(|e| DatabaseError::Query(e.to_string()))?
+        })
+        .await
+        .map_err(|e| DatabaseError::Query(e.to_string()))?
     }
 }
 
@@ -679,24 +732,30 @@ impl SqliteMediaStore {
 
 #[async_trait]
 impl MediaStore for SqliteMediaStore {
-    async fn get_media_cache(&self, content_hash: &str, media_kind: &str) -> DatabaseResult<Option<MediaCacheEntry>> {
+    async fn get_media_cache(
+        &self,
+        content_hash: &str,
+        media_kind: &str,
+    ) -> DatabaseResult<Option<MediaCacheEntry>> {
         let pool = self.pool.clone();
         let content_hash = content_hash.to_string();
         let media_kind = media_kind.to_string();
-        
+
         tokio::task::spawn_blocking(move || {
             let mut conn = get_conn(&pool)?;
             let result: Option<MediaCacheEntryRow> = diesel::sql_query(
                 "SELECT id, content_hash, media_kind, resource_key, created_at, updated_at
-                 FROM media_cache WHERE content_hash = ? AND media_kind = ?"
+                 FROM media_cache WHERE content_hash = ? AND media_kind = ?",
             )
             .bind::<sql_types::Text, _>(&content_hash)
             .bind::<sql_types::Text, _>(&media_kind)
             .get_result(&mut conn)
             .optional()?;
-            
+
             Ok(result.map(|r| r.into_model()))
-        }).await.map_err(|e| DatabaseError::Query(e.to_string()))?
+        })
+        .await
+        .map_err(|e| DatabaseError::Query(e.to_string()))?
     }
 
     async fn insert_media_cache(&self, entry: &MediaCacheEntry) -> DatabaseResult<MediaCacheEntry> {
@@ -704,22 +763,22 @@ impl MediaStore for SqliteMediaStore {
         let content_hash = entry.content_hash.clone();
         let media_kind = entry.media_kind.clone();
         let resource_key = entry.resource_key.clone();
-        
+
         tokio::task::spawn_blocking(move || {
             let mut conn = get_conn(&pool)?;
             diesel::sql_query(
                 "INSERT OR REPLACE INTO media_cache (content_hash, media_kind, resource_key)
-                 VALUES (?, ?, ?)"
+                 VALUES (?, ?, ?)",
             )
             .bind::<sql_types::Text, _>(&content_hash)
             .bind::<sql_types::Text, _>(&media_kind)
             .bind::<sql_types::Text, _>(&resource_key)
             .execute(&mut conn)?;
-            
+
             let id: i64 = diesel::sql_query("SELECT CAST(last_insert_rowid() AS INTEGER) as id")
                 .get_result::<IdRow>(&mut conn)?
                 .id;
-            
+
             Ok(MediaCacheEntry {
                 id,
                 content_hash,
@@ -728,20 +787,24 @@ impl MediaStore for SqliteMediaStore {
                 created_at: Utc::now(),
                 updated_at: Utc::now(),
             })
-        }).await.map_err(|e| DatabaseError::Query(e.to_string()))?
+        })
+        .await
+        .map_err(|e| DatabaseError::Query(e.to_string()))?
     }
 
     async fn cleanup_old_media_cache(&self, before: DateTime<Utc>) -> DatabaseResult<u64> {
         let pool = self.pool.clone();
         let before_str = before.to_rfc3339();
-        
+
         tokio::task::spawn_blocking(move || {
             let mut conn = get_conn(&pool)?;
             let affected = diesel::sql_query("DELETE FROM media_cache WHERE created_at < ?")
                 .bind::<sql_types::Text, _>(&before_str)
                 .execute(&mut conn)?;
             Ok(affected as u64)
-        }).await.map_err(|e| DatabaseError::Query(e.to_string()))?
+        })
+        .await
+        .map_err(|e| DatabaseError::Query(e.to_string()))?
     }
 }
 

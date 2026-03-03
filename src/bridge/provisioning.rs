@@ -55,7 +55,8 @@ impl PendingBridgeRequest {
         ttl: Duration,
     ) -> Self {
         let now = Utc::now();
-        let expires_at = now + chrono::Duration::from_std(ttl).unwrap_or_else(|_| chrono::Duration::seconds(300));
+        let expires_at = now
+            + chrono::Duration::from_std(ttl).unwrap_or_else(|_| chrono::Duration::seconds(300));
 
         Self {
             request_id: uuid::Uuid::new_v4().to_string(),

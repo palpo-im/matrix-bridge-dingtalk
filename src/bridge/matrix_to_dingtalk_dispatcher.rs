@@ -5,15 +5,15 @@ use crate::dingtalk::DingTalkService;
 use crate::formatter::MatrixToDingTalkFormatter;
 
 pub struct MatrixToDingTalkDispatcher {
-    config: Arc<Config>,
+    _config: Arc<Config>,
     dingtalk_service: Arc<DingTalkService>,
     formatter: MatrixToDingTalkFormatter,
 }
 
 impl MatrixToDingTalkDispatcher {
-    pub fn new(config: Arc<Config>, dingtalk_service: Arc<DingTalkService>) -> Self {
+    pub fn new(_config: Arc<Config>, dingtalk_service: Arc<DingTalkService>) -> Self {
         Self {
-            config,
+            _config,
             dingtalk_service,
             formatter: MatrixToDingTalkFormatter::new(),
         }
@@ -21,7 +21,7 @@ impl MatrixToDingTalkDispatcher {
 
     pub async fn dispatch_text(
         &self,
-        conversation_id: &str,
+        _conversation_id: &str,
         content: &str,
         sender: &str,
     ) -> anyhow::Result<()> {

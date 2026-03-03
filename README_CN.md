@@ -12,6 +12,8 @@
 
 - Matrix Appservice transaction 处理
 - Matrix -> 钉钉 文本转发（基于持久化 room mapping）
+- Matrix reply/edit/redaction 处理（受配置开关控制）
+- Matrix 机器人被邀请后自动入房（`m.room.member` invite）
 - 钉钉回调 -> Matrix 文本转发
 - 按会话 webhook 路由发送（支持 token 或完整 webhook URL）
 - `processed_events` 去重
@@ -34,16 +36,16 @@
 1. 复制配置文件：
 
 ```bash
-cp config/config.sample.yaml config.yaml
+cp config/config.example.yaml config.yaml
 ```
 
 2. 至少配置以下字段：
 - `bridge.domain`
 - `bridge.homeserver_url`
-- `database.url`
-- `registration.bridge_id`
-- `registration.appservice_token`
-- `registration.homeserver_token`
+- `database.uri`（或 `database.url`）
+- `registration.id`（或 `registration.bridge_id`）
+- `registration.as_token`（或 `registration.appservice_token`）
+- `registration.hs_token`（或 `registration.homeserver_token`）
 
 3. 可选环境变量覆盖：
 - `DINGTALK_WEBHOOK_URL`
@@ -75,6 +77,7 @@ cargo run --release
 
 - 现阶段以文本链路为主。
 - 富媒体和更多事件类型尚未完全桥接。
+- 回调安全当前仅做 token 校验，暂未实现 AES 解密链路。
 
 ## 许可证
 

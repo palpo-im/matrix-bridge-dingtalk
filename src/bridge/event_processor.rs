@@ -8,15 +8,15 @@ use crate::config::Config;
 use crate::dingtalk::DingTalkService;
 
 pub struct MatrixEventProcessor {
-    config: Arc<Config>,
+    _config: Arc<Config>,
     dingtalk_service: Arc<DingTalkService>,
     parser: MatrixEventParser,
 }
 
 impl MatrixEventProcessor {
-    pub fn new(config: Arc<Config>, dingtalk_service: Arc<DingTalkService>) -> Self {
+    pub fn new(_config: Arc<Config>, dingtalk_service: Arc<DingTalkService>) -> Self {
         Self {
-            config,
+            _config,
             dingtalk_service,
             parser: MatrixEventParser::new(),
         }
@@ -30,10 +30,16 @@ impl MatrixEventProcessor {
                 msgtype,
                 body,
                 formatted_body: _,
+                reply_to: _,
+                edit_of: _,
             } => {
                 self.process_message(event, msgtype, body).await?;
             }
-            ParsedEvent::Member { membership, user_id } => {
+            ParsedEvent::Member {
+                membership,
+                user_id,
+                state_key: _,
+            } => {
                 debug!("Member event: {} - {}", user_id, membership);
             }
             ParsedEvent::Redaction { redacts } => {

@@ -1,1 +1,7 @@
 /target
+
+
+_*.md
+*.log
+.tmp*
+.claude

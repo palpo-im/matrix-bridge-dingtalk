@@ -260,7 +260,10 @@ impl DingTalkClient {
                 }
                 Err(e) => {
                     if attempt < self.max_retries {
-                        debug!("Request failed, attempt {}/{}: {}", attempt, self.max_retries, e);
+                        debug!(
+                            "Request failed, attempt {}/{}: {}",
+                            attempt, self.max_retries, e
+                        );
                         let delay = self.retry_base_ms * (1 << attempt);
                         tokio::time::sleep(Duration::from_millis(delay)).await;
                         continue;
@@ -287,7 +290,10 @@ impl DingTalkClient {
             .context("Failed to send request to DingTalk")?;
 
         let status = response.status();
-        let body = response.text().await.context("Failed to read response body")?;
+        let body = response
+            .text()
+            .await
+            .context("Failed to read response body")?;
 
         if !status.is_success() {
             anyhow::bail!("DingTalk API returned status {}: {}", status, body);

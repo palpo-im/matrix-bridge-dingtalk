@@ -5,15 +5,15 @@ use crate::dingtalk::DingTalkService;
 
 #[derive(Clone)]
 pub struct MessageFlow {
-    config: Arc<Config>,
-    dingtalk_service: Arc<DingTalkService>,
+    _config: Arc<Config>,
+    _dingtalk_service: Arc<DingTalkService>,
 }
 
 impl MessageFlow {
-    pub fn new(config: Arc<Config>, dingtalk_service: Arc<DingTalkService>) -> Self {
+    pub fn new(_config: Arc<Config>, dingtalk_service: Arc<DingTalkService>) -> Self {
         Self {
-            config,
-            dingtalk_service,
+            _config,
+            _dingtalk_service: dingtalk_service,
         }
     }
 

@@ -1,6 +1,6 @@
-use std::collections::HashMap;
-use std::sync::Arc;
-use std::time::Instant;
+use std::collections::{HashMap, VecDeque};
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use anyhow::Context;
 use chrono::Utc;
@@ -9,7 +9,7 @@ use matrix_bot_sdk::client::{MatrixAuth, MatrixClient};
 use salvo::prelude::Router;
 use serde_json::Value;
 use tokio::sync::RwLock;
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 use url::Url;
 
 use super::matrix_event_parser::{MatrixEvent, MatrixEventParser, ParsedEvent};
@@ -39,17 +39,18 @@ pub struct DingTalkBridge {
     portal_manager: PortalManager,
     puppet_manager: Arc<RwLock<PuppetManager>>,
     users_by_mxid: Arc<RwLock<HashMap<String, BridgeUser>>>,
-    intents: Arc<RwLock<HashMap<String, Intent>>>,
+    _intents: Arc<RwLock<HashMap<String, Intent>>>,
     command_handler: Arc<MatrixCommandHandler>,
     provisioning: Arc<ProvisioningCoordinator>,
-    presence_handler: Arc<PresenceHandler>,
+    _presence_handler: Arc<PresenceHandler>,
     matrix_event_parser: MatrixEventParser,
     matrix_formatter: MatrixToDingTalkFormatter,
     dingtalk_formatter: DingTalkToMatrixFormatter,
+    rate_limiter: Arc<RoomRateLimiter>,
     bot_user_id: String,
     started_at: Instant,
     user_sync_policy: UserSyncPolicy,
-    user_last_synced_at: Arc<RwLock<HashMap<String, Instant>>>,
+    _user_last_synced_at: Arc<RwLock<HashMap<String, Instant>>>,
 }
 
 impl DingTalkBridge {
@@ -116,6 +117,10 @@ impl DingTalkBridge {
         let matrix_event_parser = MatrixEventParser::new();
         let matrix_formatter = MatrixToDingTalkFormatter::new();
         let dingtalk_formatter = DingTalkToMatrixFormatter::new();
+        let rate_limiter = Arc::new(RoomRateLimiter::new(
+            config.bridge.message_limit,
+            config.bridge.message_cooldown,
+        ));
 
         Ok(Self {
             config,
@@ -130,17 +135,18 @@ impl DingTalkBridge {
             portal_manager: PortalManager::new(),
             puppet_manager: Arc::new(RwLock::new(PuppetManager::new())),
             users_by_mxid: Arc::new(RwLock::new(HashMap::new())),
-            intents: Arc::new(RwLock::new(HashMap::new())),
+            _intents: Arc::new(RwLock::new(HashMap::new())),
             command_handler,
             provisioning,
-            presence_handler,
+            _presence_handler: presence_handler,
             matrix_event_parser,
             matrix_formatter,
             dingtalk_formatter,
+            rate_limiter,
             bot_user_id: bot_mxid,
             started_at: Instant::now(),
             user_sync_policy,
-            user_last_synced_at: Arc::new(RwLock::new(HashMap::new())),
+            _user_last_synced_at: Arc::new(RwLock::new(HashMap::new())),
         })
     }
 
@@ -245,22 +251,85 @@ impl DingTalkBridge {
             return Ok(());
         }
 
-        if event.event_type != "m.room.message" {
-            if !event_id.is_empty() {
-                self.mark_event_processed(&event_id, &event.event_type, "matrix")
-                    .await?;
+        match self.matrix_event_parser.parse(&event) {
+            ParsedEvent::Message {
+                msgtype,
+                body,
+                formatted_body,
+                reply_to,
+                edit_of,
+            } => {
+                self.handle_matrix_message(
+                    &event,
+                    &msgtype,
+                    &body,
+                    formatted_body.as_deref(),
+                    reply_to.as_deref(),
+                    edit_of.as_deref(),
+                )
+                .await?;
             }
-            return Ok(());
+            ParsedEvent::Member {
+                membership,
+                user_id,
+                state_key,
+            } => {
+                self.handle_member_event(&event, &membership, &user_id, state_key.as_deref())
+                    .await;
+            }
+            ParsedEvent::Redaction { redacts } => {
+                self.handle_redaction_event(redacts.as_deref()).await?;
+            }
+            ParsedEvent::Unknown(event_type) => {
+                debug!("Ignoring unsupported Matrix event type: {}", event_type);
+            }
         }
 
+        if !event_id.is_empty() {
+            self.mark_event_processed(&event_id, &event.event_type, "matrix")
+                .await?;
+        }
+
+        Ok(())
+    }
+
+    async fn handle_matrix_message(
+        &self,
+        event: &MatrixEvent,
+        msgtype: &str,
+        body: &str,
+        formatted_body: Option<&str>,
+        reply_to: Option<&str>,
+        edit_of: Option<&str>,
+    ) -> anyhow::Result<()> {
         let room_id = event.room_id.clone().unwrap_or_default();
         let sender = event.sender.clone().unwrap_or_default();
+        let event_id = event.event_id.clone().unwrap_or_default();
 
         if room_id.is_empty() || sender.is_empty() {
             anyhow::bail!("matrix event missing room_id or sender");
         }
 
-        if sender == self.bot_user_id {
+        if self.is_bridge_bot_sender(&sender) {
+            return Ok(());
+        }
+
+        if !self.rate_limiter.allow(&room_id) {
+            warn!(
+                room_id = %room_id,
+                event_id = %event_id,
+                "Dropping Matrix event due to room rate limit"
+            );
+            return Ok(());
+        }
+
+        if self.is_blocked_msgtype(msgtype) {
+            debug!(
+                room_id = %room_id,
+                event_id = %event_id,
+                msgtype = %msgtype,
+                "Skipping blocked Matrix msgtype"
+            );
             return Ok(());
         }
 
@@ -268,24 +337,75 @@ impl DingTalkBridge {
             return Ok(());
         };
 
-        let parsed = self.matrix_event_parser.parse(&event);
-        let (body, msg_type) = match parsed {
-            ParsedEvent::Message {
-                msgtype,
-                body,
-                formatted_body,
-            } => {
-                let body_source = formatted_body.as_deref().unwrap_or(&body);
-                let rendered = self.matrix_formatter.format_text(body_source, &sender);
-                (rendered, msgtype)
+        let source_text = formatted_body.unwrap_or(body);
+        if let Some(command) =
+            MatrixCommandHandler::parse_command(source_text, room_id.clone(), sender.clone())
+        {
+            let outcome = self
+                .command_handler
+                .handle(command, &self.bot_intent)
+                .await?;
+            let reply = match outcome {
+                super::MatrixCommandOutcome::Success(message) => Some(message),
+                super::MatrixCommandOutcome::Error(message) => Some(message),
+                super::MatrixCommandOutcome::NoAction => None,
+            };
+            if let Some(reply) = reply {
+                let _ = self.bot_intent.send_text(&room_id, &reply).await;
             }
-            _ => return Ok(()),
+            return Ok(());
+        }
+
+        if msgtype.starts_with("m.image") && !self.config.bridge.allow_images {
+            return Ok(());
+        }
+        if msgtype.starts_with("m.video") && !self.config.bridge.allow_videos {
+            return Ok(());
+        }
+        if msgtype.starts_with("m.audio") && !self.config.bridge.allow_audio {
+            return Ok(());
+        }
+        if (msgtype.starts_with("m.file") || msgtype == "m.sticker")
+            && !self.config.bridge.allow_files
+        {
+            return Ok(());
+        }
+
+        let rendered = if msgtype == "m.emote" {
+            self.matrix_formatter
+                .format_text(&format!("* {}", source_text), &sender)
+        } else if matches!(
+            msgtype,
+            "m.image" | "m.video" | "m.audio" | "m.file" | "m.sticker"
+        ) {
+            let media_label = msgtype.trim_start_matches("m.");
+            self.matrix_formatter
+                .format_text(&format!("[{}] {}", media_label, source_text), &sender)
+        } else {
+            self.matrix_formatter.format_text(source_text, &sender)
         };
+
+        let mut outbound = rendered;
+        if let Some(reply_event_id) = reply_to {
+            if self.config.bridge.bridge_matrix_reply {
+                outbound = format!("↪ {} \n{}", reply_event_id, outbound);
+            }
+        }
+        if let Some(target_event_id) = edit_of {
+            if !self.config.bridge.bridge_matrix_edit {
+                return Ok(());
+            }
+            outbound = format!("(edit {})\n{}", target_event_id, outbound);
+        }
+        outbound = self.truncate_for_policy(&outbound);
+        if outbound.trim().is_empty() {
+            return Ok(());
+        }
 
         self.dingtalk_service
             .send_text_to_conversation(
                 Some(&mapping.dingtalk_conversation_id),
-                &body,
+                &outbound,
                 None,
                 None,
                 false,
@@ -307,15 +427,140 @@ impl DingTalkBridge {
                 mapping.dingtalk_conversation_id.clone(),
             )
             .with_content_hash(Some(format!(
-                "{}:{}:{}",
-                mapping.dingtalk_conversation_id, msg_type, body
+                "{}:{}:{}:{}:{}",
+                mapping.dingtalk_conversation_id,
+                msgtype,
+                outbound,
+                reply_to.unwrap_or_default(),
+                edit_of.unwrap_or_default()
             )));
             let _ = self.save_message_mapping(&message_mapping).await;
-            self.mark_event_processed(&event_id, "m.room.message", "matrix")
-                .await?;
         }
 
         Ok(())
+    }
+
+    async fn handle_member_event(
+        &self,
+        event: &MatrixEvent,
+        membership: &str,
+        sender: &str,
+        state_key: Option<&str>,
+    ) {
+        if membership != "invite" {
+            return;
+        }
+
+        let room_id = event.room_id.as_deref().unwrap_or_default();
+        if room_id.is_empty() {
+            return;
+        }
+
+        let state_key = state_key.unwrap_or_default();
+        if !self.is_bot_mxid(state_key) {
+            return;
+        }
+
+        match self.bot_intent.join_room(room_id).await {
+            Ok(joined_room_id) => info!(
+                sender = %sender,
+                room_id = %room_id,
+                joined_room_id = %joined_room_id,
+                "Auto-joined Matrix room after invite"
+            ),
+            Err(err) => warn!(
+                sender = %sender,
+                room_id = %room_id,
+                error = %err,
+                "Failed to auto-join Matrix room after invite"
+            ),
+        }
+    }
+
+    async fn handle_redaction_event(&self, redacts: Option<&str>) -> anyhow::Result<()> {
+        if !self.config.bridge.bridge_matrix_redactions {
+            return Ok(());
+        }
+
+        let Some(redacts) = redacts else {
+            return Ok(());
+        };
+
+        if let Err(err) = self.message_store.delete_message_mapping(redacts).await {
+            warn!(
+                matrix_event_id = %redacts,
+                error = %err,
+                "Failed to delete message mapping for redacted Matrix event"
+            );
+        }
+
+        Ok(())
+    }
+
+    fn is_blocked_msgtype(&self, msgtype: &str) -> bool {
+        self.config
+            .bridge
+            .blocked_matrix_msgtypes
+            .iter()
+            .any(|blocked| blocked.eq_ignore_ascii_case(msgtype))
+    }
+
+    fn truncate_for_policy(&self, content: &str) -> String {
+        let max = self.config.bridge.max_text_length;
+        if max == 0 {
+            return content.to_string();
+        }
+
+        let char_count = content.chars().count();
+        if char_count <= max {
+            return content.to_string();
+        }
+
+        let mut truncated: String = content.chars().take(max).collect();
+        truncated.push_str(" …");
+        truncated
+    }
+
+    fn is_bot_mxid(&self, mxid: &str) -> bool {
+        if mxid.eq_ignore_ascii_case(&self.bot_user_id) {
+            return true;
+        }
+
+        let configured_bot = format!(
+            "@{}:{}",
+            self.config.bridge.bot_username, self.config.bridge.domain
+        );
+        mxid.eq_ignore_ascii_case(&configured_bot)
+    }
+
+    fn is_bridge_bot_sender(&self, sender: &str) -> bool {
+        if self.is_bot_mxid(sender) {
+            return true;
+        }
+
+        let sender = sender.trim();
+        let Some(stripped) = sender.strip_prefix('@') else {
+            return false;
+        };
+        let Some((localpart, domain)) = stripped.rsplit_once(':') else {
+            return false;
+        };
+        if !domain.eq_ignore_ascii_case(&self.config.bridge.domain) {
+            return false;
+        }
+
+        let Some((prefix, suffix)) = self
+            .config
+            .bridge
+            .username_template
+            .split_once("{{.}}")
+            .or_else(|| self.config.bridge.username_template.split_once("{user_id}"))
+        else {
+            return false;
+        };
+        localpart.starts_with(prefix)
+            && localpart.ends_with(suffix)
+            && localpart.len() > prefix.len() + suffix.len()
     }
 
     pub async fn forward_dingtalk_text(
@@ -333,7 +578,8 @@ impl DingTalkBridge {
         };
 
         if let Some(msg_id) = dingtalk_msg_id {
-            if self.is_event_processed(msg_id).await? {
+            let dedupe_event_id = format!("dingtalk:{}", msg_id);
+            if self.is_event_processed(&dedupe_event_id).await? {
                 return Ok(String::new());
             }
         }
@@ -344,10 +590,7 @@ impl DingTalkBridge {
             .send_text(&mapping.matrix_room_id, &matrix_body)
             .await
             .with_context(|| {
-                format!(
-                    "send text to matrix room {} failed",
-                    mapping.matrix_room_id
-                )
+                format!("send text to matrix room {} failed", mapping.matrix_room_id)
             })?;
 
         let dingtalk_message_id = dingtalk_msg_id
@@ -361,15 +604,11 @@ impl DingTalkBridge {
             self.bot_user_id.clone(),
             sender_id.to_string(),
         )
-        .with_content_hash(Some(format!(
-            "{}:{}",
-            sender_id,
-            content
-        )));
+        .with_content_hash(Some(format!("{}:{}", sender_id, content)));
         let _ = self.save_message_mapping(&message_mapping).await;
 
         if let Some(msg_id) = dingtalk_msg_id {
-            self.mark_event_processed(msg_id, "dingtalk.text", "dingtalk")
+            self.mark_event_processed(&format!("dingtalk:{}", msg_id), "dingtalk.text", "dingtalk")
                 .await?;
         }
 
@@ -432,7 +671,11 @@ impl DingTalkBridge {
         Ok(removed)
     }
 
-    pub async fn list_room_mappings(&self, limit: i64, offset: i64) -> anyhow::Result<Vec<RoomMapping>> {
+    pub async fn list_room_mappings(
+        &self,
+        limit: i64,
+        offset: i64,
+    ) -> anyhow::Result<Vec<RoomMapping>> {
         self.room_store
             .list_room_mappings(limit.max(1), offset.max(0))
             .await
@@ -673,7 +916,10 @@ impl DingTalkBridge {
     }
 
     fn portal_from_mapping(mapping: &RoomMapping) -> BridgePortal {
-        let room_type = if mapping.dingtalk_conversation_type.eq_ignore_ascii_case("direct") {
+        let room_type = if mapping
+            .dingtalk_conversation_type
+            .eq_ignore_ascii_case("direct")
+        {
             RoomType::Direct
         } else {
             RoomType::Group
@@ -735,6 +981,50 @@ impl DingTalkBridge {
     }
 }
 
+struct RoomRateLimiter {
+    limit: usize,
+    window: Duration,
+    events_by_room: Mutex<HashMap<String, VecDeque<Instant>>>,
+}
+
+impl RoomRateLimiter {
+    fn new(limit: u32, window_millis: u64) -> Self {
+        Self {
+            limit: limit as usize,
+            window: Duration::from_millis(window_millis),
+            events_by_room: Mutex::new(HashMap::new()),
+        }
+    }
+
+    fn allow(&self, room_id: &str) -> bool {
+        if self.limit == 0 || self.window.is_zero() {
+            return true;
+        }
+
+        let now = Instant::now();
+        let mut guard = self
+            .events_by_room
+            .lock()
+            .expect("room rate limiter mutex poisoned");
+        let queue = guard.entry(room_id.to_string()).or_default();
+
+        while let Some(timestamp) = queue.front() {
+            if now.duration_since(*timestamp) > self.window {
+                queue.pop_front();
+            } else {
+                break;
+            }
+        }
+
+        if queue.len() >= self.limit {
+            return false;
+        }
+
+        queue.push_back(now);
+        true
+    }
+}
+
 pub struct BridgeHandler {
     bridge: Arc<DingTalkBridge>,
 }
@@ -749,5 +1039,65 @@ impl BridgeHandler {
 impl AppserviceHandler for BridgeHandler {
     async fn on_transaction(&self, _txn_id: &str, body: &Value) -> anyhow::Result<()> {
         self.bridge.handle_matrix_transaction(body).await
+    }
+
+    async fn query_user(&self, user_id: &str) -> anyhow::Result<Option<Value>> {
+        let localpart = user_id
+            .strip_prefix('@')
+            .and_then(|value| value.split(':').next())
+            .unwrap_or(user_id);
+        let prefix = self
+            .bridge
+            .config
+            .bridge
+            .username_template
+            .replace("{{.}}", "");
+        if localpart.starts_with(&prefix) {
+            return Ok(Some(serde_json::json!({
+                "displayname": localpart,
+            })));
+        }
+        Ok(None)
+    }
+
+    async fn query_room_alias(&self, room_alias: &str) -> anyhow::Result<Option<Value>> {
+        let localpart = room_alias
+            .strip_prefix('#')
+            .and_then(|value| value.split(':').next())
+            .unwrap_or(room_alias);
+        if localpart.starts_with("dingtalk_") {
+            return Ok(Some(serde_json::json!({
+                "name": format!("DingTalk {}", localpart),
+                "topic": "Bridged from DingTalk",
+                "preset": "private_chat",
+                "visibility": "private",
+            })));
+        }
+        Ok(None)
+    }
+
+    async fn thirdparty_protocol(&self, _protocol: &str) -> anyhow::Result<Option<Value>> {
+        Ok(Some(serde_json::json!({
+            "user_fields": ["id", "name"],
+            "location_fields": ["id", "name"],
+            "icon": "mxc://example.org/dingtalk",
+            "field_types": {
+                "id": {
+                    "regexp": ".*",
+                    "placeholder": "DingTalk ID"
+                },
+                "name": {
+                    "regexp": ".*",
+                    "placeholder": "Display name"
+                }
+            },
+            "instances": [{
+                "network_id": "dingtalk",
+                "bot_user_id": self.bridge.bot_user_id.clone(),
+                "desc": "DingTalk",
+                "icon": "mxc://example.org/dingtalk",
+                "fields": {}
+            }]
+        })))
     }
 }

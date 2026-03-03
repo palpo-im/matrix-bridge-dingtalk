@@ -12,21 +12,20 @@ pub mod puppet;
 pub mod user;
 
 pub use command_handler::{
-    DingTalkCommandHandler, DingTalkCommandOutcome, MatrixCommandHandler,
-    MatrixCommandOutcome,
+    DingTalkCommandHandler, DingTalkCommandOutcome, MatrixCommandHandler, MatrixCommandOutcome,
 };
 pub use dingtalk_bridge::DingTalkBridge;
 pub use event_processor::MatrixEventProcessor;
 pub use matrix_event_parser::MatrixEvent;
 pub use message_flow::{
-    DingTalkInboundMessage, MatrixInboundMessage, MessageFlow,
-    OutboundDingTalkMessage, OutboundMatrixMessage,
+    DingTalkInboundMessage, MatrixInboundMessage, MessageFlow, OutboundDingTalkMessage,
+    OutboundMatrixMessage,
 };
 pub use presence_handler::{
-    DingTalkPresence, DingTalkPresenceStatus, MatrixPresenceState,
-    MatrixPresenceTarget, PresenceHandler,
+    DingTalkPresence, DingTalkPresenceStatus, MatrixPresenceState, MatrixPresenceTarget,
+    PresenceHandler,
 };
 pub use provisioning::{
-    ApprovalResponseStatus, BridgeRequestStatus, PendingBridgeRequest,
-    ProvisioningCoordinator, ProvisioningError,
+    ApprovalResponseStatus, BridgeRequestStatus, PendingBridgeRequest, ProvisioningCoordinator,
+    ProvisioningError,
 };
