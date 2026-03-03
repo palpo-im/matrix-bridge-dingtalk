@@ -5,8 +5,8 @@ use matrix_bridge_dingtalk::database::{Database, DeadLetterEvent};
 use tempfile::NamedTempFile;
 
 fn load_test_config(db_url: &str) -> Config {
-    let mut config: Config = serde_yaml::from_str(include_str!("../config/config.sample.yaml"))
-        .expect("sample config should parse");
+    let mut config: Config = serde_yaml::from_str(include_str!("../config/config.example.yaml"))
+        .expect("example config should parse");
     config.database.url = Some(db_url.to_string());
     config.bridge.domain = "localhost".to_string();
     config.bridge.homeserver_url = "http://localhost:8008".to_string();

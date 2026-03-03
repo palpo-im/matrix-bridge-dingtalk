@@ -1,5 +1,4 @@
 # Matrix-DingTalk Bridge Configuration
-# Compatible with legacy config keys while aligning key sections with matrix-bridge-feishu.
 #
 # Environment override examples:
 # - CONFIG_PATH
@@ -63,20 +62,6 @@ bridge:
   webhook_timeout: 30
   api_timeout: 60
 
-  # Legacy compatibility controls (still honored)
-  presence_interval: 500
-  disable_presence: false
-  disable_typing_notifications: false
-  disable_deletion_forwarding: false
-  enable_self_service_bridging: false
-  disable_portal_bridging: false
-  disable_read_receipts: false
-  disable_join_leave_notifications: false
-  disable_invite_notifications: false
-  disable_room_topic_notifications: false
-  user_limit: null
-  admin_mxid: "@admin:127.0.0.1:8008"
-
   permissions:
     "*": "relay"
     "127.0.0.1:8008": "full"
@@ -117,7 +102,6 @@ auth:
     secret: "CHANGE_ME_DINGTALK_SECRET"
     ip_whitelist: []
 
-# Optional legacy sections kept for backward compatibility.
 room:
   default_visibility: "private"
   room_alias_prefix: "_dingtalk_"

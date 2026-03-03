@@ -208,30 +208,6 @@ pub struct BridgeConfig {
     pub enable_rich_text: bool,
     #[serde(default)]
     pub convert_cards: bool,
-    #[serde(default = "default_presence_interval")]
-    pub presence_interval: u64,
-    #[serde(default)]
-    pub disable_presence: bool,
-    #[serde(default)]
-    pub disable_typing_notifications: bool,
-    #[serde(default)]
-    pub disable_deletion_forwarding: bool,
-    #[serde(default)]
-    pub enable_self_service_bridging: bool,
-    #[serde(default)]
-    pub disable_portal_bridging: bool,
-    #[serde(default)]
-    pub disable_read_receipts: bool,
-    #[serde(default)]
-    pub disable_join_leave_notifications: bool,
-    #[serde(default)]
-    pub disable_invite_notifications: bool,
-    #[serde(default)]
-    pub disable_room_topic_notifications: bool,
-    #[serde(default)]
-    pub user_limit: Option<u32>,
-    #[serde(default)]
-    pub admin_mxid: Option<String>,
 }
 
 impl Default for BridgeConfig {
@@ -275,18 +251,6 @@ impl Default for BridgeConfig {
             api_timeout: default_api_timeout(),
             enable_rich_text: true,
             convert_cards: false,
-            presence_interval: default_presence_interval(),
-            disable_presence: false,
-            disable_typing_notifications: false,
-            disable_deletion_forwarding: false,
-            enable_self_service_bridging: false,
-            disable_portal_bridging: false,
-            disable_read_receipts: false,
-            disable_join_leave_notifications: false,
-            disable_invite_notifications: false,
-            disable_room_topic_notifications: false,
-            user_limit: None,
-            admin_mxid: None,
         }
     }
 }
@@ -823,10 +787,6 @@ fn default_api_timeout() -> u64 {
     60
 }
 
-fn default_presence_interval() -> u64 {
-    500
-}
-
 fn default_sender_localpart() -> String {
     "_dingtalk_bot".to_string()
 }
@@ -966,16 +926,5 @@ mod tests {
         assert_eq!(config.bridge.message_limit, 60);
         assert_eq!(config.bridge.message_cooldown, 1000);
         assert!(config.bridge.permissions.contains_key("*"));
-    }
-
-    #[test]
-    fn parse_legacy_sample_config() {
-        let config = Config::load_from_bytes(include_bytes!("../../config/config.sample.yaml"))
-            .expect("legacy sample config should still parse");
-
-        assert_eq!(config.bridge.port, 9006);
-        assert_eq!(config.bridge.bind_address, "0.0.0.0");
-        assert_eq!(config.database.db_type_name(), "sqlite");
-        assert!(config.database.connection_string().starts_with("sqlite://"));
     }
 }
