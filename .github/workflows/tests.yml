@@ -1,0 +1,29 @@
+name: CI
+
+on: [push, pull_request]
+
+jobs:
+  typos:
+    name: Typos
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Typos check
+        uses: crate-ci/typos@master
+
+  rust-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - name: Cache cargo artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: .
+      - name: Cargo check
+        run: cargo check -p matrix-bridge-dingtalk
+      - name: Cargo test
+        run: cargo test -p matrix-bridge-dingtalk
+      - name: Cargo integration test (bridge_flows)
+        run: cargo test -p matrix-bridge-dingtalk --test bridge_flows
