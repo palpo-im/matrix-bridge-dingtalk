@@ -7,6 +7,9 @@
 # - DINGTALK_CLIENT_ID / DINGTALK_CLIENT_SECRET
 # - DINGTALK_STREAM_*
 # - MATRIX_BRIDGE_DINGTALK_PROVISIONING_READ_TOKEN / WRITE_TOKEN / DELETE_TOKEN
+#
+# Matrix appservice registration is loaded from:
+# ./appservices/dingtalk-registration.yaml (relative to this config file)
 
 bridge:
   # Matrix homeserver domain part
@@ -68,19 +71,6 @@ bridge:
     "*": "relay"
     "127.0.0.1:8008": "full"
     "@admin:127.0.0.1:8008": "admin"
-
-registration:
-  id: "dingtalk"
-  as_token: "CHANGE_ME_AS_TOKEN"
-  hs_token: "CHANGE_ME_HS_TOKEN"
-  sender_localpart: "_dingtalk_bot"
-  namespaces:
-    users:
-      - exclusive: true
-        regex: "^@dingtalk_.*:127.0.0.1:8008$"
-    aliases: []
-    rooms: []
-  rate_limited: false
 
 logging:
   min_level: "info"

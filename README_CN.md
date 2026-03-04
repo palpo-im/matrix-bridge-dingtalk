@@ -33,19 +33,23 @@
 
 ## 快速开始
 
-1. 复制配置文件：
+1. 复制主配置和 registration 模板：
 
 ```bash
 cp config/config.example.yaml config.yaml
+mkdir -p appservices
+cp appservices/dingtalk-registration.example.yaml appservices/dingtalk-registration.yaml
 ```
+
+桥接器会从 `<config_dir>/appservices/dingtalk-registration.yaml` 加载 appservice registration。
 
 2. 至少配置以下字段：
 - `bridge.domain`
 - `bridge.homeserver_url`
 - `database.uri`（或 `database.url`）
-- `registration.id`（或 `registration.bridge_id`）
-- `registration.as_token`（或 `registration.appservice_token`）
-- `registration.hs_token`（或 `registration.homeserver_token`）
+- `appservices/dingtalk-registration.yaml: id`（或 `bridge_id`）
+- `appservices/dingtalk-registration.yaml: as_token`（或 `appservice_token`）
+- `appservices/dingtalk-registration.yaml: hs_token`（或 `homeserver_token`）
 - `stream.client_id`
 - `stream.client_secret`
 

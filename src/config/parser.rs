@@ -8,7 +8,7 @@ use super::ConfigError;
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Config {
     pub bridge: BridgeConfig,
-    #[serde(default)]
+    #[serde(skip)]
     pub registration: RegistrationConfig,
     #[serde(default)]
     pub auth: AuthConfig,
@@ -41,8 +41,10 @@ impl Config {
     }
 
     pub fn load_from_path<P: AsRef<Path>>(path: P) -> Result<Self, ConfigError> {
-        let content = std::fs::read_to_string(path.as_ref())?;
+        let config_path = path.as_ref();
+        let content = std::fs::read_to_string(config_path)?;
         let mut config: Config = serde_yaml::from_str(&content)?;
+        config.registration = Self::load_registration_from_path(config_path)?;
 
         config.apply_env_overrides()?;
         config.validate()?;
@@ -52,9 +54,28 @@ impl Config {
 
     pub fn load_from_bytes(bytes: &[u8]) -> Result<Self, ConfigError> {
         let mut config: Config = serde_yaml::from_slice(bytes)?;
+        config.registration = RegistrationConfig::default();
         config.apply_env_overrides()?;
         config.validate()?;
         Ok(config)
+    }
+
+    fn load_registration_from_path(config_path: &Path) -> Result<RegistrationConfig, ConfigError> {
+        let config_dir = config_path.parent().unwrap_or(Path::new("."));
+        let registration_path = config_dir
+            .join("appservices")
+            .join("dingtalk-registration.yaml");
+        let registration_content =
+            std::fs::read_to_string(&registration_path).map_err(|error| {
+                ConfigError::InvalidConfig(format!(
+                    "failed to load registration file {}: {}",
+                    registration_path.display(),
+                    error
+                ))
+            })?;
+
+        let registration: RegistrationConfig = serde_yaml::from_str(&registration_content)?;
+        Ok(registration)
     }
 
     fn apply_env_overrides(&mut self) -> Result<(), ConfigError> {
@@ -1048,13 +1069,24 @@ fn deserialize_registration_protocols<'de, D>(deserializer: D) -> Result<Vec<Str
 where
     D: Deserializer<'de>,
 {
-    let s: String = Deserialize::deserialize(deserializer)?;
-    Ok(vec![s])
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum RegistrationProtocols {
+        Single(String),
+        Multiple(Vec<String>),
+    }
+
+    let value = RegistrationProtocols::deserialize(deserializer)?;
+    Ok(match value {
+        RegistrationProtocols::Single(protocol) => vec![protocol],
+        RegistrationProtocols::Multiple(protocols) => protocols,
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::Config;
+    use tempfile::tempdir;
 
     #[test]
     fn parse_new_example_config() {
@@ -1076,5 +1108,30 @@ mod tests {
             config.stream.client_id,
             "CHANGE_ME_DINGTALK_CLIENT_ID".to_string()
         );
+    }
+
+    #[test]
+    fn load_split_registration_from_appservices_directory() {
+        let temp_dir = tempdir().expect("temp dir should be created");
+        let appservices_dir = temp_dir.path().join("appservices");
+        std::fs::create_dir_all(&appservices_dir).expect("appservices directory should be created");
+
+        let config_path = temp_dir.path().join("config.yaml");
+        std::fs::write(
+            &config_path,
+            include_str!("../../config/config.example.yaml"),
+        )
+        .expect("config file should be written");
+        std::fs::write(
+            appservices_dir.join("dingtalk-registration.yaml"),
+            include_str!("../../appservices/dingtalk-registration.example.yaml"),
+        )
+        .expect("registration file should be written");
+
+        let config = Config::load_from_path(&config_path)
+            .expect("split config and registration should parse");
+        assert_eq!(config.registration.bridge_id, "dingtalk");
+        assert_eq!(config.registration.sender_localpart, "_dingtalk_bot");
+        assert_eq!(config.registration.protocols, vec!["dingtalk".to_string()]);
     }
 }

@@ -33,19 +33,23 @@ Usable baseline implemented. Core bidirectional text bridge, admin provisioning 
 
 ## Quick Start
 
-1. Copy config:
+1. Copy config and registration template:
 
 ```bash
 cp config/config.example.yaml config.yaml
+mkdir -p appservices
+cp appservices/dingtalk-registration.example.yaml appservices/dingtalk-registration.yaml
 ```
+
+The bridge loads appservice registration from `<config_dir>/appservices/dingtalk-registration.yaml`.
 
 2. Edit at least:
 - `bridge.domain`
 - `bridge.homeserver_url`
 - `database.uri` (or `database.url`)
-- `registration.id` (or `registration.bridge_id`)
-- `registration.as_token` (or `registration.appservice_token`)
-- `registration.hs_token` (or `registration.homeserver_token`)
+- `appservices/dingtalk-registration.yaml: id` (or `bridge_id`)
+- `appservices/dingtalk-registration.yaml: as_token` (or `appservice_token`)
+- `appservices/dingtalk-registration.yaml: hs_token` (or `homeserver_token`)
 - `stream.client_id`
 - `stream.client_secret`
 

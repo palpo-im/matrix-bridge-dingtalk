@@ -1,0 +1,16 @@
+id: dingtalk
+url: "http://localhost:9006"
+as_token: "" #put_your_as_token_here_generate_with_openssl_rand_hex_32
+hs_token: "" #put_your_hs_token_here_generate_with_openssl_rand_hex_32
+sender_localpart: _dingtalk_bot
+namespaces:
+  users:
+    - exclusive: true
+      regex: "^@dingtalk_.*:127\\.0\\.0\\.1:8008$"
+  aliases:
+    - exclusive: true
+      regex: "^#_dingtalk_.*:127\\.0\\.0\\.1:8008$"
+  rooms: []
+rate_limited: false
+protocols:
+  - dingtalk
