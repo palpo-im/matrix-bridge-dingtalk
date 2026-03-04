@@ -12,7 +12,7 @@ use matrix_bridge_dingtalk::web::{
 use reqwest::Client;
 use salvo::prelude::*;
 use serde_json::{Value, json};
-use tracing::{Level, error, info};
+use tracing::{Level, info};
 use tracing_subscriber::FmtSubscriber;
 
 #[derive(Parser, Debug)]
@@ -166,19 +166,16 @@ async fn main() -> anyhow::Result<()> {
     let web_server = start_web_server(config.clone(), bridge.clone());
     tokio::spawn(web_server);
 
-    let bridge_clone = bridge.clone();
-    tokio::select! {
-        result = bridge_clone.start() => {
-            if let Err(e) = result {
-                error!("Bridge error: {}", e);
-                return Err(e);
-            }
-            info!("Bridge started");
-        }
-        _ = tokio::signal::ctrl_c() => {
-            info!("Received shutdown signal");
-        }
-    }
+    bridge
+        .start()
+        .await
+        .context("Failed to start bridge background services")?;
+    info!("Bridge started");
+
+    tokio::signal::ctrl_c()
+        .await
+        .context("Failed waiting for shutdown signal")?;
+    info!("Received shutdown signal");
 
     bridge.stop().await;
     info!("Bridge stopped");
@@ -220,6 +217,7 @@ async fn start_web_server(config: Config, bridge: Arc<DingTalkBridge>) {
         .push(Router::with_path("admin").push(provisioning_api.router()));
 
     if config.callback.enabled {
+        info!("DingTalk callback endpoint enabled (compatibility mode)");
         router = router.push(
             Router::with_path("dingtalk/callback")
                 .hoop(affix_state::inject(bridge.clone()))

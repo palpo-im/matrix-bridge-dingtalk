@@ -14,7 +14,7 @@
 - Matrix -> 钉钉 文本转发（基于持久化 room mapping）
 - Matrix reply/edit/redaction 处理（受配置开关控制）
 - Matrix 机器人被邀请后自动入房（`m.room.member` invite）
-- 钉钉回调 -> Matrix 文本转发
+- 钉钉 Stream 模式（`/v1.0/im/bot/messages/get`）-> Matrix 文本转发
 - 按会话 webhook 路由发送（支持 token 或完整 webhook URL）
 - `processed_events` 去重
 - `message_mappings` 映射落库
@@ -27,9 +27,9 @@
 钉钉常见两种机器人模式：
 
 - 群自定义 webhook 机器人：主要用于 webhook 出站发送。
-- 企业应用机器人：支持回调事件与会话 webhook。
+- 企业应用机器人：支持 Stream 事件与会话 webhook。
 
-本项目当前支持 webhook 出站 + callback 入站的文本链路。
+本项目当前使用 Stream 作为主入站链路，callback 作为兼容回退链路。
 
 ## 快速开始
 
@@ -46,11 +46,20 @@ cp config/config.example.yaml config.yaml
 - `registration.id`（或 `registration.bridge_id`）
 - `registration.as_token`（或 `registration.appservice_token`）
 - `registration.hs_token`（或 `registration.homeserver_token`）
+- `stream.client_id`
+- `stream.client_secret`
 
 3. 可选环境变量覆盖：
 - `DINGTALK_WEBHOOK_URL`
 - `DINGTALK_ACCESS_TOKEN`
 - `DINGTALK_SECRET`
+- `DINGTALK_CLIENT_ID`
+- `DINGTALK_CLIENT_SECRET`
+- `DINGTALK_STREAM_OPENAPI_HOST`
+- `DINGTALK_STREAM_KEEP_ALIVE_IDLE_SECS`
+- `DINGTALK_STREAM_RECONNECT_INTERVAL_SECS`
+- `DINGTALK_STREAM_AUTO_RECONNECT`
+- `DINGTALK_STREAM_ENABLED`
 - `DINGTALK_CALLBACK_TOKEN`
 - `MATRIX_BRIDGE_DINGTALK_PROVISIONING_*_TOKEN`
 
@@ -77,7 +86,7 @@ cargo run --release
 
 - 现阶段以文本链路为主。
 - 富媒体和更多事件类型尚未完全桥接。
-- 回调安全当前仅做 token 校验，暂未实现 AES 解密链路。
+- callback 兼容模式当前仅做 token 校验，暂未实现 AES 解密链路。
 
 ## 许可证
 

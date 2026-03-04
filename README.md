@@ -16,7 +16,7 @@ Usable baseline implemented. Core bidirectional text bridge, admin provisioning 
 - Matrix -> DingTalk text forwarding (by persisted room mapping)
 - Matrix reply/edit/redaction handling (with policy switches)
 - Matrix bot auto-join on invite (`m.room.member` invite)
-- DingTalk callback -> Matrix text forwarding
+- DingTalk Stream mode (`/v1.0/im/bot/messages/get`) -> Matrix text forwarding
 - Per-conversation DingTalk webhook routing (token or full webhook URL)
 - Dedup via `processed_events`
 - Message mapping persistence via `message_mappings`
@@ -28,8 +28,8 @@ Usable baseline implemented. Core bidirectional text bridge, admin provisioning 
 
 - DingTalk has two common robot modes:
   - Group custom webhook robot: outbound webhook send.
-  - Enterprise app chatbot: callback/event + session webhook.
-- This project supports webhook-based outbound and callback-based inbound text flow.
+  - Enterprise app chatbot: stream/event + session webhook.
+- This project uses Stream mode as the primary inbound path and keeps callback as compatibility fallback.
 
 ## Quick Start
 
@@ -46,11 +46,20 @@ cp config/config.example.yaml config.yaml
 - `registration.id` (or `registration.bridge_id`)
 - `registration.as_token` (or `registration.appservice_token`)
 - `registration.hs_token` (or `registration.homeserver_token`)
+- `stream.client_id`
+- `stream.client_secret`
 
 3. Optional env overrides:
 - `DINGTALK_WEBHOOK_URL`
 - `DINGTALK_ACCESS_TOKEN`
 - `DINGTALK_SECRET`
+- `DINGTALK_CLIENT_ID`
+- `DINGTALK_CLIENT_SECRET`
+- `DINGTALK_STREAM_OPENAPI_HOST`
+- `DINGTALK_STREAM_KEEP_ALIVE_IDLE_SECS`
+- `DINGTALK_STREAM_RECONNECT_INTERVAL_SECS`
+- `DINGTALK_STREAM_AUTO_RECONNECT`
+- `DINGTALK_STREAM_ENABLED`
 - `DINGTALK_CALLBACK_TOKEN`
 - `MATRIX_BRIDGE_DINGTALK_PROVISIONING_*_TOKEN`
 
@@ -77,7 +86,7 @@ Base URL: `http://<bind_address>:<port>/admin`
 
 - Focuses on text path first.
 - Rich media/event types are not fully bridged yet.
-- Callback security currently validates token only (no AES decrypt path yet).
+- Callback compatibility mode currently validates token only (no AES decrypt path yet).
 
 ## License
 

@@ -80,6 +80,7 @@ impl DingTalkBridge {
             access_token,
             secret,
             callback_token,
+            config.stream.clone(),
             webhook_tokens,
         ));
 

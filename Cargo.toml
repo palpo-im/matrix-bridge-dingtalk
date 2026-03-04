@@ -67,6 +67,7 @@ base64 = "0.22"
 hex = "0.4"
 urlencoding = "2.1"
 lru = "0.16"
+dingtalk-sdk = { path = "../dingtalk-sdk" }
 
 [dev-dependencies]
 tokio-test = "0.4"

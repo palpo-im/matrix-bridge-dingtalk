@@ -918,6 +918,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "dingtalk-sdk"
+version = "0.1.0"
+dependencies = [
+ "aes",
+ "async-trait",
+ "base64",
+ "cbc",
+ "chrono",
+ "futures-util",
+ "hex",
+ "hmac",
+ "rand 0.10.0",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "serde_repr",
+ "sha1",
+ "sha2",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-tungstenite",
+ "tracing",
+ "url",
+]
+
+[[package]]
 name = "displaydoc"
 version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1909,6 +1935,7 @@ dependencies = [
  "clap",
  "config",
  "diesel",
+ "dingtalk-sdk",
  "futures",
  "hex",
  "hmac",
@@ -2760,6 +2787,7 @@ dependencies = [
  "rustls-platform-verifier",
  "serde",
  "serde_json",
+ "serde_urlencoded",
  "sync_wrapper",
  "tokio",
  "tokio-rustls",
@@ -3413,6 +3441,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "serde_repr"
+version = "0.1.20"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "175ee3e80ae9982737ca543e96133087cbd9a485eecc3bc4de9c1a37b47ea59c"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
+]
+
+[[package]]
 name = "serde_spanned"
 version = "1.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3812,9 +3851,9 @@ checksum = "1f3ccbac311fea05f86f61904b462b55fb3df8837a366dfc601a0161d0532f20"
 
 [[package]]
 name = "tokio"
-version = "1.49.0"
+version = "1.50.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "72a2903cd7736441aac9df9d7688bd0ce48edccaadf181c3b90be801e81d3d86"
+checksum = "27ad5e34374e03cfffefc301becb44e9dc3c17584f414349ebe29ed26661822d"
 dependencies = [
  "bytes",
  "libc",
@@ -3878,7 +3917,11 @@ checksum = "d25a406cddcc431a75d3d9afc6a7c0f7428d4891dd973e4d54c56b46127bf857"
 dependencies = [
  "futures-util",
  "log",
+ "rustls",
+ "rustls-native-certs",
+ "rustls-pki-types",
  "tokio",
+ "tokio-rustls",
  "tungstenite",
 ]
 
@@ -4082,8 +4125,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8628dcc84e5a09eb3d8423d6cb682965dea9133204e8fb3efee74c2a0c259442"
 dependencies = [
  "bytes",
+ "data-encoding",
+ "http",
+ "httparse",
  "log",
  "rand 0.9.2",
+ "rustls",
+ "rustls-pki-types",
+ "sha1",
  "thiserror 2.0.18",
  "utf-8",
 ]

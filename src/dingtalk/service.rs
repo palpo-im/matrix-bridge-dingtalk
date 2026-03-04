@@ -1,14 +1,20 @@
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::Result;
+use dingtalk_sdk::stream::{
+    DataFrame, DataFrameResponse, DingTalkStreamClient, EVENT_HEADER_TYPE,
+    TOPIC_BOT_MESSAGE_CALLBACK, event_success_response,
+};
 use serde_json::Value;
 use tokio::sync::RwLock;
-use tracing::{debug, info, warn};
+use tracing::{debug, error, info, warn};
 
 use super::client::DingTalkClient;
 use super::types::*;
 use crate::bridge::DingTalkBridge;
+use crate::config::StreamConfig;
 
 #[derive(Clone)]
 pub struct DingTalkService {
@@ -17,6 +23,7 @@ pub struct DingTalkService {
     default_webhook_url: String,
     default_secret: Option<String>,
     callback_token: Option<String>,
+    stream_config: StreamConfig,
     bridge: Arc<RwLock<Option<Arc<DingTalkBridge>>>>,
 }
 
@@ -26,6 +33,7 @@ impl DingTalkService {
         access_token: String,
         secret: Option<String>,
         callback_token: Option<String>,
+        stream_config: StreamConfig,
         webhook_tokens: HashMap<String, String>,
     ) -> Self {
         let default_client = DingTalkClient::new(webhook_url.clone(), access_token, secret.clone());
@@ -46,6 +54,7 @@ impl DingTalkService {
             default_webhook_url: webhook_url,
             default_secret: secret,
             callback_token,
+            stream_config,
             bridge: Arc::new(RwLock::new(None)),
         }
     }
@@ -57,7 +66,12 @@ impl DingTalkService {
 
     pub async fn start(&self, bridge: Arc<DingTalkBridge>) -> Result<()> {
         self.set_bridge(bridge).await;
-        info!("DingTalk service started");
+        if !self.stream_config.enabled {
+            info!("DingTalk stream mode disabled; service stays in callback compatibility mode");
+            return Ok(());
+        }
+
+        self.start_stream_mode().await?;
         Ok(())
     }
 
@@ -88,6 +102,159 @@ impl DingTalkService {
         Ok(serde_json::json!({"errcode": 0, "errmsg": "success"}))
     }
 
+    async fn start_stream_mode(&self) -> Result<()> {
+        let client_id = self.stream_config.client_id.trim().to_string();
+        let client_secret = self.stream_config.client_secret.trim().to_string();
+        if client_id.is_empty() || client_secret.is_empty() {
+            anyhow::bail!("stream mode enabled but stream.client_id/stream.client_secret is empty");
+        }
+
+        let mut stream_client =
+            DingTalkStreamClient::new(client_id, client_secret).map_err(|err| {
+                anyhow::anyhow!("failed to initialize dingtalk stream client: {}", err)
+            })?;
+        {
+            let cfg = stream_client.config_mut();
+            cfg.openapi_host = self.stream_config.openapi_host.clone();
+            cfg.keep_alive_idle =
+                Duration::from_secs(self.stream_config.keep_alive_idle_secs.max(1));
+            cfg.auto_reconnect = self.stream_config.auto_reconnect;
+            cfg.reconnect_interval =
+                Duration::from_secs(self.stream_config.reconnect_interval_secs.max(1));
+            cfg.local_ip = self.stream_config.local_ip.clone();
+        }
+
+        let service = self.clone();
+        stream_client.register_callback_handler(TOPIC_BOT_MESSAGE_CALLBACK, move |frame| {
+            let service = service.clone();
+            async move { service.handle_stream_bot_message(frame).await }
+        });
+
+        stream_client.register_all_event_handler(|frame| async move {
+            let event_type = frame.header(EVENT_HEADER_TYPE).unwrap_or("unknown");
+            debug!(
+                topic = frame.topic().unwrap_or("unknown"),
+                event_type, "Ignoring unsupported DingTalk EVENT frame"
+            );
+            Ok(Some(event_success_response()?))
+        });
+
+        info!(
+            openapi_host = %self.stream_config.openapi_host,
+            reconnect = self.stream_config.auto_reconnect,
+            keep_alive_idle_secs = self.stream_config.keep_alive_idle_secs,
+            reconnect_interval_secs = self.stream_config.reconnect_interval_secs,
+            "Starting DingTalk stream client"
+        );
+
+        stream_client
+            .start()
+            .await
+            .map_err(|err| anyhow::anyhow!("dingtalk stream client stopped: {}", err))
+    }
+
+    async fn handle_stream_bot_message(
+        &self,
+        frame: DataFrame,
+    ) -> dingtalk_sdk::Result<Option<DataFrameResponse>> {
+        let payload_result = serde_json::from_str::<Value>(&frame.data);
+        let payload = match payload_result {
+            Ok(payload) => payload,
+            Err(err) => {
+                error!(
+                    message_id = frame.message_id().unwrap_or_default(),
+                    error = %err,
+                    "Failed to parse DingTalk stream callback payload"
+                );
+                if let Some(bridge) = self.bridge.read().await.as_ref().cloned() {
+                    let dedupe_key = format!(
+                        "dingtalk:stream:{}",
+                        frame.message_id().unwrap_or("unknown")
+                    );
+                    let _ = bridge
+                        .record_dead_letter(
+                            "dingtalk",
+                            "stream_parse_error",
+                            &dedupe_key,
+                            None,
+                            serde_json::json!({
+                                "topic": frame.topic(),
+                                "raw_data": frame.data,
+                            }),
+                            &err.to_string(),
+                        )
+                        .await;
+                }
+                return Ok(Some(DataFrameResponse::success()));
+            }
+        };
+
+        let event: Result<DingTalkWebhookMessage> = serde_json::from_value(payload.clone())
+            .map_err(|err| {
+                anyhow::anyhow!(
+                    "parse stream payload as DingTalkWebhookMessage failed: {}",
+                    err
+                )
+            });
+
+        match event {
+            Ok(event) => {
+                let conversation_id = event.effective_conversation_id().map(str::to_string);
+                let msg_id = event.msg_id.clone();
+                let dedupe_key = format!(
+                    "dingtalk:stream:{}:{}",
+                    msg_id.as_deref().unwrap_or("unknown"),
+                    conversation_id.as_deref().unwrap_or("unknown")
+                );
+                if let Err(err) = self.process_event(event).await {
+                    error!(
+                        message_id = frame.message_id().unwrap_or_default(),
+                        conversation_id = conversation_id.as_deref().unwrap_or("unknown"),
+                        error = %err,
+                        "Failed to process DingTalk stream callback payload"
+                    );
+                    if let Some(bridge) = self.bridge.read().await.as_ref().cloned() {
+                        let _ = bridge
+                            .record_dead_letter(
+                                "dingtalk",
+                                "stream_callback_text",
+                                &dedupe_key,
+                                conversation_id,
+                                payload,
+                                &err.to_string(),
+                            )
+                            .await;
+                    }
+                }
+            }
+            Err(err) => {
+                error!(
+                    message_id = frame.message_id().unwrap_or_default(),
+                    error = %err,
+                    "Failed to deserialize DingTalk stream callback payload"
+                );
+                if let Some(bridge) = self.bridge.read().await.as_ref().cloned() {
+                    let dedupe_key = format!(
+                        "dingtalk:stream_deser:{}",
+                        frame.message_id().unwrap_or("unknown")
+                    );
+                    let _ = bridge
+                        .record_dead_letter(
+                            "dingtalk",
+                            "stream_deserialize_error",
+                            &dedupe_key,
+                            None,
+                            payload,
+                            &err.to_string(),
+                        )
+                        .await;
+                }
+            }
+        }
+
+        Ok(Some(DataFrameResponse::success()))
+    }
+
     async fn process_event(&self, event: DingTalkWebhookMessage) -> Result<()> {
         let guard = self.bridge.read().await;
         let bridge = guard
@@ -95,10 +262,11 @@ impl DingTalkService {
             .ok_or_else(|| anyhow::anyhow!("Bridge not initialized"))?;
 
         let msgtype = event.msgtype.as_deref().unwrap_or("unknown");
-        let conversation_id = event.conversation_id.as_deref().unwrap_or("unknown");
+        let msgtype_normalized = msgtype.to_ascii_lowercase();
+        let conversation_id = event.effective_conversation_id().unwrap_or("unknown");
 
         if let (Some(conversation_id), Some(session_webhook)) = (
-            event.conversation_id.as_deref(),
+            event.effective_conversation_id(),
             event.session_webhook.as_deref(),
         ) {
             self.register_conversation_webhook(conversation_id, session_webhook)
@@ -110,12 +278,15 @@ impl DingTalkService {
             msgtype, conversation_id
         );
 
-        match msgtype {
+        match msgtype_normalized.as_str() {
             "text" => {
-                if let Some(text) = &event.text {
-                    if let Some(content) = &text.content {
-                        self.handle_text_message(bridge, content, &event).await?;
-                    }
+                if let Some(content) = event.effective_text_content() {
+                    self.handle_text_message(bridge, &content, &event).await?;
+                } else {
+                    warn!(
+                        "DingTalk text event does not contain textual content: conversation={} msg_id={:?}",
+                        conversation_id, event.msg_id
+                    );
                 }
             }
             _ => {
@@ -156,8 +327,8 @@ impl DingTalkService {
     ) -> Result<()> {
         debug!("Handling text message: {}", content);
 
-        let sender_id = event.sender_id.as_deref().unwrap_or("unknown");
-        let conversation_id = event.conversation_id.as_deref().unwrap_or("unknown");
+        let sender_id = event.effective_sender_id().unwrap_or("unknown");
+        let conversation_id = event.effective_conversation_id().unwrap_or("unknown");
 
         info!(
             "Text message from {} in {}: {}",
