@@ -334,6 +334,39 @@ impl DingTalkBridge {
             anyhow::bail!("matrix event missing room_id or sender");
         }
 
+        // Parse and handle commands FIRST, before all other checks
+        // This allows commands to work even without room mappings and from regular users
+        let source_text = formatted_body.unwrap_or(body);
+        if let Some(command) =
+            MatrixCommandHandler::parse_command(source_text, room_id.clone(), sender.clone())
+        {
+            println!("[DEBUG] Command detected in message: {:?}", command);
+            match self.command_handler.handle(command, &self.bot_intent).await {
+                Ok(outcome) => {
+                    println!("[DEBUG] Command handler outcome: {:?}", outcome);
+                    let reply = match outcome {
+                        super::MatrixCommandOutcome::Success(message) => Some(message),
+                        super::MatrixCommandOutcome::Error(message) => Some(message),
+                        super::MatrixCommandOutcome::NoAction => None,
+                    };
+                    if let Some(ref reply) = reply {
+                        println!("[DEBUG] Sending command reply to room {}: {}", room_id, reply);
+                        match self.bot_intent.send_text(&room_id, reply).await {
+                            Ok(_) => println!("[DEBUG] Command reply sent successfully"),
+                            Err(e) => println!("[DEBUG] Failed to send command reply: {}", e),
+                        }
+                    } else {
+                        println!("[DEBUG] No reply to send (NoAction)");
+                    }
+                }
+                Err(e) => {
+                    println!("[DEBUG] Command handler error: {}", e);
+                }
+            }
+            return Ok(());
+        }
+
+        // Ignore messages from the bridge bot itself (to prevent loops)
         if self.is_bridge_bot_sender(&sender) {
             println!("[DEBUG] Ignoring message from bridge bot: {}", sender);
             return Ok(());
@@ -366,36 +399,6 @@ impl DingTalkBridge {
         };
 
         println!("[DEBUG] Found room mapping: {} -> {}", room_id, mapping.dingtalk_conversation_id);
-
-        let source_text = formatted_body.unwrap_or(body);
-        if let Some(command) =
-            MatrixCommandHandler::parse_command(source_text, room_id.clone(), sender.clone())
-        {
-            println!("[DEBUG] Command detected in message: {:?}", command);
-            match self.command_handler.handle(command, &self.bot_intent).await {
-                Ok(outcome) => {
-                    println!("[DEBUG] Command handler outcome: {:?}", outcome);
-                    let reply = match outcome {
-                        super::MatrixCommandOutcome::Success(message) => Some(message),
-                        super::MatrixCommandOutcome::Error(message) => Some(message),
-                        super::MatrixCommandOutcome::NoAction => None,
-                    };
-                    if let Some(ref reply) = reply {
-                        println!("[DEBUG] Sending command reply to room {}: {}", room_id, reply);
-                        match self.bot_intent.send_text(&room_id, reply).await {
-                            Ok(_) => println!("[DEBUG] Command reply sent successfully"),
-                            Err(e) => println!("[DEBUG] Failed to send command reply: {}", e),
-                        }
-                    } else {
-                        println!("[DEBUG] No reply to send (NoAction)");
-                    }
-                }
-                Err(e) => {
-                    println!("[DEBUG] Command handler error: {}", e);
-                }
-            }
-            return Ok(());
-        }
 
         println!("[DEBUG] Not a command, proceeding to forward to DingTalk");
 
