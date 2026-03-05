@@ -118,7 +118,7 @@ async fn main() -> anyhow::Result<()> {
         return Ok(());
     }
 
-    let config = Config::load_from_path(&config_path).with_context(|| {
+    let config = Config::load_from_file(&config_path).with_context(|| {
         format!(
             "Failed to load config at '{}'; use --generate-config to print a template",
             config_path.display()

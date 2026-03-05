@@ -2,13 +2,14 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use serde::{Deserialize, Deserializer, Serialize};
+use serde_yaml::Value;
 
 use super::ConfigError;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Config {
     pub bridge: BridgeConfig,
-    #[serde(skip)]
+    #[serde(default)]
     pub registration: RegistrationConfig,
     #[serde(default)]
     pub auth: AuthConfig,
@@ -37,14 +38,23 @@ impl Config {
         let config_path =
             std::env::var("CONFIG_PATH").unwrap_or_else(|_| "config.yaml".to_string());
 
-        Self::load_from_path(&config_path)
+        Self::load_from_file(&config_path)
     }
 
-    pub fn load_from_path<P: AsRef<Path>>(path: P) -> Result<Self, ConfigError> {
+    pub fn load_from_file<P: AsRef<Path>>(path: P) -> Result<Self, ConfigError> {
         let config_path = path.as_ref();
         let content = std::fs::read_to_string(config_path)?;
+
+        // Check if registration is defined in the config file
+        let yaml_value: Value = serde_yaml::from_str(&content)?;
+        let has_registration_in_config = yaml_value.get("registration").is_some();
+
         let mut config: Config = serde_yaml::from_str(&content)?;
-        config.registration = Self::load_registration_from_path(config_path)?;
+
+        // Try to load registration from config file first, then fallback to separate file
+        if !has_registration_in_config {
+            config.registration = Self::load_registration_from_path(config_path)?;
+        }
 
         config.apply_env_overrides()?;
         config.validate()?;
@@ -62,17 +72,27 @@ impl Config {
 
     fn load_registration_from_path(config_path: &Path) -> Result<RegistrationConfig, ConfigError> {
         let config_dir = config_path.parent().unwrap_or(Path::new("."));
+        println!("Loading config_path {}", config_path.display());
+        println!("Loading registration config from {}", config_dir.display());
         let registration_path = config_dir
             .join("appservices")
             .join("dingtalk-registration.yaml");
-        let registration_content =
-            std::fs::read_to_string(&registration_path).map_err(|error| {
-                ConfigError::InvalidConfig(format!(
+
+        // Try to read the registration file, return default if it doesn't exist
+        let registration_content = match std::fs::read_to_string(&registration_path) {
+            Ok(content) => content,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                println!("Registration file not found at {}, using default values", registration_path.display());
+                return Ok(RegistrationConfig::default());
+            }
+            Err(error) => {
+                return Err(ConfigError::InvalidConfig(format!(
                     "failed to load registration file {}: {}",
                     registration_path.display(),
                     error
-                ))
-            })?;
+                )));
+            }
+        };
 
         let registration: RegistrationConfig = serde_yaml::from_str(&registration_content)?;
         Ok(registration)
@@ -399,6 +419,13 @@ impl Default for RegistrationConfig {
             rate_limited: false,
             protocols: default_registration_protocols(),
         }
+    }
+}
+
+impl RegistrationConfig {
+    /// Check if the registration config is empty (not loaded from a config file)
+    pub fn is_empty(&self) -> bool {
+        self.bridge_id.is_empty() || self.appservice_token.is_empty() || self.homeserver_token.is_empty()
     }
 }
 
@@ -1128,10 +1155,93 @@ mod tests {
         )
         .expect("registration file should be written");
 
-        let config = Config::load_from_path(&config_path)
+        let config = Config::load_from_file(&config_path)
             .expect("split config and registration should parse");
         assert_eq!(config.registration.bridge_id, "dingtalk");
         assert_eq!(config.registration.sender_localpart, "_dingtalk_bot");
         assert_eq!(config.registration.protocols, vec!["dingtalk".to_string()]);
+    }
+
+    #[test]
+    fn load_registration_from_main_config_file() {
+        let temp_dir = tempdir().expect("temp dir should be created");
+        let config_path = temp_dir.path().join("config.yaml");
+
+        let config_content = r#"
+bridge:
+  domain: "127.0.0.1:8008"
+  homeserver_url: "http://127.0.0.1:8008"
+
+registration:
+  bridge_id: "test-bridge"
+  appservice_token: "test_as_token"
+  homeserver_token: "test_hs_token"
+  sender_localpart: "_test_bot"
+  protocols:
+    - "test"
+
+database:
+  uri: "sqlite://./test.db"
+
+stream:
+  enabled: false
+"#;
+        std::fs::write(&config_path, config_content)
+            .expect("config file should be written");
+
+        let config = Config::load_from_file(&config_path)
+            .expect("registration from main config should parse");
+        assert_eq!(config.registration.bridge_id, "test-bridge");
+        assert_eq!(config.registration.appservice_token, "test_as_token");
+        assert_eq!(config.registration.homeserver_token, "test_hs_token");
+        assert_eq!(config.registration.sender_localpart, "_test_bot");
+        assert_eq!(config.registration.protocols, vec!["test".to_string()]);
+    }
+
+    #[test]
+    fn fallback_to_registration_file_when_not_in_config() {
+        let temp_dir = tempdir().expect("temp dir should be created");
+        let appservices_dir = temp_dir.path().join("appservices");
+        std::fs::create_dir_all(&appservices_dir).expect("appservices directory should be created");
+
+        let config_path = temp_dir.path().join("config.yaml");
+
+        // Config without registration section
+        let config_content = r#"
+bridge:
+  domain: "127.0.0.1:8008"
+  homeserver_url: "http://127.0.0.1:8008"
+
+database:
+  uri: "sqlite://./test.db"
+
+stream:
+  enabled: false
+"#;
+        std::fs::write(&config_path, config_content)
+            .expect("config file should be written");
+
+        // Registration file with custom values
+        let registration_content = r#"
+bridge_id: "fallback-bridge"
+appservice_token: "fallback_as_token"
+homeserver_token: "fallback_hs_token"
+sender_localpart: "_fallback_bot"
+protocols:
+  - "fallback"
+"#;
+        std::fs::write(
+            appservices_dir.join("dingtalk-registration.yaml"),
+            registration_content,
+        )
+        .expect("registration file should be written");
+
+        let config = Config::load_from_file(&config_path)
+            .expect("fallback to registration file should work");
+        assert_eq!(config.registration.bridge_id, "fallback-bridge");
+        assert_eq!(config.registration.appservice_token, "fallback_as_token");
+        assert_eq!(config.registration.homeserver_token, "fallback_hs_token");
+        assert_eq!(config.registration.sender_localpart, "_fallback_bot");
+        assert_eq!(config.registration.protocols, vec!["fallback".to_string()]);
     }
 }
