@@ -67,10 +67,10 @@ impl DingTalkBridge {
             .ok()
             .or_else(|| config.auth.security.secret.clone());
         let callback_token = std::env::var("DINGTALK_CALLBACK_TOKEN").ok().or_else(|| {
-            if config.callback.token.is_empty() {
+            if config.dingtalk.callback.token.is_empty() {
                 None
             } else {
-                Some(config.callback.token.clone())
+                Some(config.dingtalk.callback.token.clone())
             }
         });
         let webhook_tokens = config.auth.webhooks.clone();
@@ -80,7 +80,7 @@ impl DingTalkBridge {
             access_token,
             secret,
             callback_token,
-            config.stream.clone(),
+            config.dingtalk.clone(),
             webhook_tokens,
         ));
 

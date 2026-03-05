@@ -66,7 +66,7 @@ impl DingTalkService {
 
     pub async fn start(&self, bridge: Arc<DingTalkBridge>) -> Result<()> {
         self.set_bridge(bridge).await;
-        if !self.stream_config.enabled {
+        if !self.stream_config.stream.enabled {
             info!("DingTalk stream mode disabled; service stays in callback compatibility mode");
             return Ok(());
         }

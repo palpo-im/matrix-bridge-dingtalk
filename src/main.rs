@@ -216,7 +216,7 @@ async fn start_web_server(config: Config, bridge: Arc<DingTalkBridge>) {
         .push(Router::with_path("metrics").get(metrics_endpoint))
         .push(Router::with_path("admin").push(provisioning_api.router()));
 
-    if config.callback.enabled {
+    if config.dingtalk.callback.enabled {
         info!("DingTalk callback endpoint enabled (compatibility mode)");
         router = router.push(
             Router::with_path("dingtalk/callback")

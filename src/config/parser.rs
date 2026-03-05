@@ -26,9 +26,7 @@ pub struct Config {
     #[serde(default)]
     pub ghosts: GhostsConfig,
     #[serde(default)]
-    pub stream: StreamConfig,
-    #[serde(default)]
-    pub callback: CallbackConfig,
+    pub dingtalk: DingTalkConfig,
     #[serde(default)]
     pub metrics: MetricsConfig,
 }
@@ -142,7 +140,7 @@ impl Config {
             .or_else(|_| std::env::var("DINGTALK_STREAM_ENABLED"))
         {
             if let Some(enabled) = parse_bool_str(&value) {
-                self.stream.enabled = enabled;
+                self.dingtalk.stream.enabled = enabled;
             }
         }
         if let Ok(client_id) = std::env::var("MATRIX_BRIDGE_DINGTALK_STREAM_CLIENT_ID")
@@ -150,7 +148,7 @@ impl Config {
             .or_else(|_| std::env::var("DINGTALK_STREAM_CLIENT_ID"))
         {
             if !client_id.trim().is_empty() {
-                self.stream.client_id = client_id;
+                self.dingtalk.client_id = client_id;
             }
         }
         if let Ok(client_secret) = std::env::var("MATRIX_BRIDGE_DINGTALK_STREAM_CLIENT_SECRET")
@@ -158,42 +156,42 @@ impl Config {
             .or_else(|_| std::env::var("DINGTALK_STREAM_CLIENT_SECRET"))
         {
             if !client_secret.trim().is_empty() {
-                self.stream.client_secret = client_secret;
+                self.dingtalk.client_secret = client_secret;
             }
         }
         if let Ok(openapi_host) = std::env::var("MATRIX_BRIDGE_DINGTALK_STREAM_OPENAPI_HOST")
             .or_else(|_| std::env::var("DINGTALK_STREAM_OPENAPI_HOST"))
         {
             if !openapi_host.trim().is_empty() {
-                self.stream.openapi_host = openapi_host;
+                self.dingtalk.openapi_host = openapi_host;
             }
         }
         if let Ok(value) = std::env::var("MATRIX_BRIDGE_DINGTALK_STREAM_KEEP_ALIVE_IDLE_SECS")
             .or_else(|_| std::env::var("DINGTALK_STREAM_KEEP_ALIVE_IDLE_SECS"))
         {
             if let Ok(parsed) = value.parse::<u64>() {
-                self.stream.keep_alive_idle_secs = parsed.max(1);
+                self.dingtalk.keep_alive_idle_secs = parsed.max(1);
             }
         }
         if let Ok(value) = std::env::var("MATRIX_BRIDGE_DINGTALK_STREAM_RECONNECT_INTERVAL_SECS")
             .or_else(|_| std::env::var("DINGTALK_STREAM_RECONNECT_INTERVAL_SECS"))
         {
             if let Ok(parsed) = value.parse::<u64>() {
-                self.stream.reconnect_interval_secs = parsed.max(1);
+                self.dingtalk.reconnect_interval_secs = parsed.max(1);
             }
         }
         if let Ok(value) = std::env::var("MATRIX_BRIDGE_DINGTALK_STREAM_AUTO_RECONNECT")
             .or_else(|_| std::env::var("DINGTALK_STREAM_AUTO_RECONNECT"))
         {
             if let Some(enabled) = parse_bool_str(&value) {
-                self.stream.auto_reconnect = enabled;
+                self.dingtalk.auto_reconnect = enabled;
             }
         }
         if let Ok(local_ip) = std::env::var("MATRIX_BRIDGE_DINGTALK_STREAM_LOCAL_IP")
             .or_else(|_| std::env::var("DINGTALK_STREAM_LOCAL_IP"))
         {
             let trimmed = local_ip.trim();
-            self.stream.local_ip = if trimmed.is_empty() {
+            self.dingtalk.local_ip = if trimmed.is_empty() {
                 None
             } else {
                 Some(trimmed.to_string())
@@ -231,30 +229,30 @@ impl Config {
                 "bridge.message_cooldown must be > 0 when bridge.message_limit > 0".to_string(),
             ));
         }
-        if self.stream.enabled {
-            if self.stream.client_id.trim().is_empty() {
+        if self.dingtalk.stream.enabled {
+            if self.dingtalk.client_id.trim().is_empty() {
                 return Err(ConfigError::InvalidConfig(
-                    "stream.client_id is required when stream.enabled is true".to_string(),
+                    "dingtalk.client_id is required when dingtalk.stream.enabled is true".to_string(),
                 ));
             }
-            if self.stream.client_secret.trim().is_empty() {
+            if self.dingtalk.client_secret.trim().is_empty() {
                 return Err(ConfigError::InvalidConfig(
-                    "stream.client_secret is required when stream.enabled is true".to_string(),
+                    "dingtalk.client_secret is required when dingtalk.stream.enabled is true".to_string(),
                 ));
             }
-            if self.stream.openapi_host.trim().is_empty() {
+            if self.dingtalk.openapi_host.trim().is_empty() {
                 return Err(ConfigError::InvalidConfig(
-                    "stream.openapi_host cannot be empty when stream.enabled is true".to_string(),
+                    "dingtalk.openapi_host cannot be empty when dingtalk.stream.enabled is true".to_string(),
                 ));
             }
-            if self.stream.keep_alive_idle_secs == 0 {
+            if self.dingtalk.keep_alive_idle_secs == 0 {
                 return Err(ConfigError::InvalidConfig(
-                    "stream.keep_alive_idle_secs must be > 0".to_string(),
+                    "dingtalk.keep_alive_idle_secs must be > 0".to_string(),
                 ));
             }
-            if self.stream.reconnect_interval_secs == 0 {
+            if self.dingtalk.reconnect_interval_secs == 0 {
                 return Err(ConfigError::InvalidConfig(
-                    "stream.reconnect_interval_secs must be > 0".to_string(),
+                    "dingtalk.reconnect_interval_secs must be > 0".to_string(),
                 ));
             }
         }
@@ -813,9 +811,19 @@ impl Default for GhostsConfig {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct StreamConfig {
+pub struct DingTalkStreamConfig {
     #[serde(default = "default_true")]
     pub enabled: bool,
+}
+
+impl Default for DingTalkStreamConfig {
+    fn default() -> Self {
+        Self { enabled: true }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct DingTalkConfig {
     #[serde(default)]
     pub client_id: String,
     #[serde(default)]
@@ -830,12 +838,15 @@ pub struct StreamConfig {
     pub auto_reconnect: bool,
     #[serde(default)]
     pub local_ip: Option<String>,
+    #[serde(default)]
+    pub stream: DingTalkStreamConfig,
+    #[serde(default)]
+    pub callback: CallbackConfig,
 }
 
-impl Default for StreamConfig {
+impl Default for DingTalkConfig {
     fn default() -> Self {
         Self {
-            enabled: true,
             client_id: String::new(),
             client_secret: String::new(),
             openapi_host: default_stream_openapi_host(),
@@ -843,9 +854,14 @@ impl Default for StreamConfig {
             reconnect_interval_secs: default_stream_reconnect_interval_secs(),
             auto_reconnect: true,
             local_ip: None,
+            stream: DingTalkStreamConfig::default(),
+            callback: CallbackConfig::default(),
         }
     }
 }
+
+// Legacy type alias for backwards compatibility
+pub type StreamConfig = DingTalkConfig;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct CallbackConfig {
@@ -1130,9 +1146,9 @@ mod tests {
         assert_eq!(config.bridge.message_limit, 60);
         assert_eq!(config.bridge.message_cooldown, 1000);
         assert!(config.bridge.permissions.contains_key("*"));
-        assert!(config.stream.enabled);
+        assert!(config.dingtalk.stream.enabled);
         assert_eq!(
-            config.stream.client_id,
+            config.dingtalk.client_id,
             "CHANGE_ME_DINGTALK_CLIENT_ID".to_string()
         );
     }
@@ -1183,8 +1199,9 @@ registration:
 database:
   uri: "sqlite://./test.db"
 
-stream:
-  enabled: false
+dingtalk:
+  stream:
+    enabled: false
 "#;
         std::fs::write(&config_path, config_content)
             .expect("config file should be written");
@@ -1215,8 +1232,9 @@ bridge:
 database:
   uri: "sqlite://./test.db"
 
-stream:
-  enabled: false
+dingtalk:
+  stream:
+    enabled: false
 "#;
         std::fs::write(&config_path, config_content)
             .expect("config file should be written");
