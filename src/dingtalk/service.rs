@@ -92,7 +92,7 @@ impl DingTalkService {
     }
 
     pub async fn handle_callback(&self, body: &str) -> Result<Value> {
-        debug!("Received DingTalk callback: {}", body);
+        println!("[DEBUG] DingTalk callback received: {}", body);
 
         let event: DingTalkWebhookMessage = serde_json::from_str(body)
             .map_err(|e| anyhow::anyhow!("Failed to parse callback: {}", e))?;
@@ -157,9 +157,15 @@ impl DingTalkService {
         &self,
         frame: DataFrame,
     ) -> dingtalk_sdk::Result<Option<DataFrameResponse>> {
+        println!("[DEBUG] DingTalk stream message received: message_id={:?}, topic={:?}",
+            frame.message_id(), frame.topic());
+
         let payload_result = serde_json::from_str::<Value>(&frame.data);
         let payload = match payload_result {
-            Ok(payload) => payload,
+            Ok(payload) => {
+                println!("[DEBUG] DingTalk stream payload parsed successfully");
+                payload
+            },
             Err(err) => {
                 error!(
                     message_id = frame.message_id().unwrap_or_default(),
@@ -256,6 +262,9 @@ impl DingTalkService {
     }
 
     async fn process_event(&self, event: DingTalkWebhookMessage) -> Result<()> {
+        println!("[DEBUG] DingTalk event received: msgtype={:?}, conversation={:?}, sender={:?}, msg_id={:?}",
+            event.msgtype, event.conversation_id, event.sender_id, event.msg_id);
+
         let guard = self.bridge.read().await;
         let bridge = guard
             .as_ref()
@@ -264,6 +273,8 @@ impl DingTalkService {
         let msgtype = event.msgtype.as_deref().unwrap_or("unknown");
         let msgtype_normalized = msgtype.to_ascii_lowercase();
         let conversation_id = event.effective_conversation_id().unwrap_or("unknown");
+
+        println!("[DEBUG] Processing DingTalk event: type={}, conversation={}", msgtype, conversation_id);
 
         if let (Some(conversation_id), Some(session_webhook)) = (
             event.effective_conversation_id(),
@@ -325,10 +336,12 @@ impl DingTalkService {
         content: &str,
         event: &DingTalkWebhookMessage,
     ) -> Result<()> {
-        debug!("Handling text message: {}", content);
+        println!("[DEBUG] Handling DingTalk text message: content={}", content);
 
         let sender_id = event.effective_sender_id().unwrap_or("unknown");
         let conversation_id = event.effective_conversation_id().unwrap_or("unknown");
+
+        println!("[DEBUG] DingTalk text message details: sender_id={}, conversation_id={}", sender_id, conversation_id);
 
         info!(
             "Text message from {} in {}: {}",

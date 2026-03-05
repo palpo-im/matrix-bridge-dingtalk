@@ -73,18 +73,110 @@ cp appservices/dingtalk-registration.example.yaml appservices/dingtalk-registrat
 cargo run --release
 ```
 
+## 绑定钉钉群组到 Matrix 房间
+
+有两种方法可以将钉钉会话绑定到 Matrix 房间：
+
+### 方法 1：Matrix 房间命令
+
+你可以在任何桥接机器人所在的 Matrix 房间中直接发送命令：
+
+- `!dingtalk bridge <dingtalk_conversation_id>` - 将此 Matrix 房间链接到钉钉会话
+- `!dingtalk unbridge` - 移除此房间的桥接
+- `!dingtalk help` - 显示可用命令
+
+**示例：**
+```
+!dingtalk bridge "yourconversationid"
+```
+
+机器人会回复一条 curl 命令，你可以使用该命令通过 HTTP API 完成桥接。
+
+### 方法 2：HTTP 配置 API
+
+基础地址：`http://<bind_address>:<port>/admin`
+
+#### 创建桥接（将 Matrix 房间链接到钉钉会话）
+
+```bash
+curl -X POST http://localhost:9006/admin/bridge \
+  -H "Authorization: Bearer YOUR_WRITE_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "matrix_room_id": "!abc123:yourdomain.com",
+    "dingtalk_conversation_id": "yourconversationid",
+    "dingtalk_conversation_name": "可选的会话名称"
+  }'
+```
+
+**响应示例：**
+```json
+{
+  "status": "bridged",
+  "mapping": {
+    "matrix_room_id": "!abc123:yourdomain.com",
+    "dingtalk_conversation_id": "yourconversationid"
+  }
+}
+```
+
+#### 移除桥接
+
+```bash
+curl -X POST http://localhost:9006/admin/unbridge \
+  -H "Authorization: Bearer YOUR_WRITE_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "matrix_room_id": "!abc123:yourdomain.com"
+  }'
+```
+
+**响应示例：**
+```json
+{
+  "status": "unbridged",
+  "matrix_room_id": "!abc123:yourdomain.com"
+}
+```
+
+#### 列出所有桥接
+
+```bash
+curl -X GET "http://localhost:9006/admin/mappings?limit=100&offset=0" \
+  -H "Authorization: Bearer YOUR_READ_TOKEN"
+```
+
+#### 获取桥接状态
+
+```bash
+curl -X GET http://localhost:9006/admin/status \
+  -H "Authorization: Bearer YOUR_READ_TOKEN"
+```
+
+### 如何查找钉钉会话 ID
+
+钉钉会话 ID 可以在钉钉 Stream 模式事件中找到。当从钉钉群组发送消息时，桥接器会在调试输出中记录：
+
+```
+[DEBUG] DingTalk event received: conversation=...
+```
+
+你也可以检查桥接器日志，当钉钉消息到达时查看会话 ID。
+
 ## Admin API
 
 基础地址：`http://<bind_address>:<port>/admin`
 
-- `GET /status`
-- `GET /mappings?limit=100&offset=0`
-- `POST /bridge`
-- `POST /unbridge`
-- `GET /dead-letters?status=pending&limit=100`
-- `POST /dead-letters/<id>/replay`
-- `POST /dead-letters/replay`
-- `POST /dead-letters/cleanup`
+所有端点都需要 Bearer token 认证（除非未配置 token）。
+
+- `GET /status` - 获取桥接状态和统计信息
+- `GET /mappings?limit=100&offset=0` - 列出所有房间映射
+- `POST /bridge` - 创建新桥接（详见上方）
+- `POST /unbridge` - 移除桥接（详见上方）
+- `GET /dead-letters?status=pending&limit=100` - 列出死信事件
+- `POST /dead-letters/<id>/replay` - 重放特定死信事件
+- `POST /dead-letters/replay` - 按状态批量重放死信
+- `POST /dead-letters/cleanup` - 清理旧死信事件
 
 ## 当前限制
 

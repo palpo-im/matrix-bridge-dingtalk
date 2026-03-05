@@ -73,18 +73,110 @@ The bridge loads appservice registration from `<config_dir>/appservices/dingtalk
 cargo run --release
 ```
 
+## Binding DingTalk Rooms to Matrix
+
+There are two ways to bind/link DingTalk conversations to Matrix rooms:
+
+### Method 1: Matrix Room Commands
+
+You can send commands directly in any Matrix room where the bridge bot is present:
+
+- `!dingtalk bridge <dingtalk_conversation_id>` - Link this Matrix room to a DingTalk conversation
+- `!dingtalk unbridge` - Remove the bridge from this room
+- `!dingtalk help` - Show available commands
+
+**Example:**
+```
+!dingtalk bridge "yourconversationid"
+```
+
+The bot will respond with a curl command you can use to complete the bridging via the HTTP API.
+
+### Method 2: HTTP Provisioning API
+
+Base URL: `http://<bind_address>:<port>/admin`
+
+#### Create a Bridge (Link Matrix Room to DingTalk Conversation)
+
+```bash
+curl -X POST http://localhost:9006/admin/bridge \
+  -H "Authorization: Bearer YOUR_WRITE_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "matrix_room_id": "!abc123:yourdomain.com",
+    "dingtalk_conversation_id": "yourconversationid",
+    "dingtalk_conversation_name": "Optional Conversation Name"
+  }'
+```
+
+**Response:**
+```json
+{
+  "status": "bridged",
+  "mapping": {
+    "matrix_room_id": "!abc123:yourdomain.com",
+    "dingtalk_conversation_id": "yourconversationid"
+  }
+}
+```
+
+#### Remove a Bridge
+
+```bash
+curl -X POST http://localhost:9006/admin/unbridge \
+  -H "Authorization: Bearer YOUR_WRITE_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "matrix_room_id": "!abc123:yourdomain.com"
+  }'
+```
+
+**Response:**
+```json
+{
+  "status": "unbridged",
+  "matrix_room_id": "!abc123:yourdomain.com"
+}
+```
+
+#### List All Bridges
+
+```bash
+curl -X GET "http://localhost:9006/admin/mappings?limit=100&offset=0" \
+  -H "Authorization: Bearer YOUR_READ_TOKEN"
+```
+
+#### Get Bridge Status
+
+```bash
+curl -X GET http://localhost:9006/admin/status \
+  -H "Authorization: Bearer YOUR_READ_TOKEN"
+```
+
+### Finding Your DingTalk Conversation ID
+
+The DingTalk conversation ID can be found in the DingTalk Stream mode events. When a message is sent from a DingTalk group, the bridge will log it in debug output:
+
+```
+[DEBUG] DingTalk event received: conversation=...
+```
+
+You can also check the bridge logs when messages arrive from DingTalk to see the conversation ID.
+
 ## Admin API
 
 Base URL: `http://<bind_address>:<port>/admin`
 
-- `GET /status`
-- `GET /mappings?limit=100&offset=0`
-- `POST /bridge`
-- `POST /unbridge`
-- `GET /dead-letters?status=pending&limit=100`
-- `POST /dead-letters/<id>/replay`
-- `POST /dead-letters/replay`
-- `POST /dead-letters/cleanup`
+All endpoints require Bearer token authentication (except when tokens are not configured).
+
+- `GET /status` - Get bridge status and statistics
+- `GET /mappings?limit=100&offset=0` - List all room mappings
+- `POST /bridge` - Create a new bridge (see details above)
+- `POST /unbridge` - Remove a bridge (see details above)
+- `GET /dead-letters?status=pending&limit=100` - List dead-letter events
+- `POST /dead-letters/<id>/replay` - Replay a specific dead-letter event
+- `POST /dead-letters/replay` - Batch replay dead-letters by status
+- `POST /dead-letters/cleanup` - Clean up old dead-letter events
 
 ## Current Limits
 

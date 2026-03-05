@@ -90,6 +90,10 @@ impl DingTalkBridge {
             config.registration.sender_localpart, config.bridge.domain
         );
 
+        println!("[DEBUG] Bridge initialized with bot MXID: {}", bot_mxid);
+        println!("[DEBUG] Registration sender_localpart: {}, bridge domain: {}",
+            config.registration.sender_localpart, config.bridge.domain);
+
         let client = MatrixClient::new(
             homeserver_url,
             MatrixAuth::new(&config.registration.appservice_token).with_user_id(&bot_mxid),
@@ -204,6 +208,8 @@ impl DingTalkBridge {
             .cloned()
             .unwrap_or_default();
 
+        println!("[DEBUG] Matrix transaction received: {} events", events.len());
+
         for raw_event in events {
             if let Err(err) = self.process_matrix_event(raw_event.clone()).await {
                 let dedupe_key = raw_event
@@ -247,8 +253,13 @@ impl DingTalkBridge {
         let event: MatrixEvent =
             serde_json::from_value(raw_event).context("invalid matrix event payload")?;
         let event_id = event.event_id.clone().unwrap_or_default();
+        let room_id = event.room_id.clone().unwrap_or_default();
+        let sender = event.sender.clone().unwrap_or_default();
+
+        println!("[DEBUG] Processing Matrix event: event_id={}, room_id={}, sender={}", event_id, room_id, sender);
 
         if !event_id.is_empty() && self.is_event_processed(&event_id).await? {
+            println!("[DEBUG] Matrix event already processed, skipping: {}", event_id);
             return Ok(());
         }
 
@@ -260,6 +271,7 @@ impl DingTalkBridge {
                 reply_to,
                 edit_of,
             } => {
+                println!("[DEBUG] Parsed as Message event: msgtype={}, body={}", msgtype, body);
                 self.handle_matrix_message(
                     &event,
                     &msgtype,
@@ -275,22 +287,27 @@ impl DingTalkBridge {
                 user_id,
                 state_key,
             } => {
+                println!("[DEBUG] Parsed as Member event: membership={}, user_id={}, state_key={:?}", membership, user_id, state_key);
                 self.handle_member_event(&event, &membership, &user_id, state_key.as_deref())
                     .await;
             }
             ParsedEvent::Redaction { redacts } => {
+                println!("[DEBUG] Parsed as Redaction event: redacts={:?}", redacts);
                 self.handle_redaction_event(redacts.as_deref()).await?;
             }
             ParsedEvent::Unknown(event_type) => {
+                println!("[DEBUG] Parsed as Unknown event type: {}", event_type);
                 debug!("Ignoring unsupported Matrix event type: {}", event_type);
             }
         }
 
         if !event_id.is_empty() {
+            println!("[DEBUG] Marking Matrix event as processed: {}", event_id);
             self.mark_event_processed(&event_id, &event.event_type, "matrix")
                 .await?;
         }
 
+        println!("[DEBUG] Successfully processed Matrix event: {}", event_id);
         Ok(())
     }
 
@@ -307,15 +324,23 @@ impl DingTalkBridge {
         let sender = event.sender.clone().unwrap_or_default();
         let event_id = event.event_id.clone().unwrap_or_default();
 
+        println!("[DEBUG] ===== Matrix message received =====");
+        println!("[DEBUG] event_id={}, room_id={}, sender={}, msgtype={}", event_id, room_id, sender, msgtype);
+        println!("[DEBUG] body={:?}", body);
+        println!("[DEBUG] formatted_body={:?}", formatted_body);
+        println!("[DEBUG] ==================================");
+
         if room_id.is_empty() || sender.is_empty() {
             anyhow::bail!("matrix event missing room_id or sender");
         }
 
         if self.is_bridge_bot_sender(&sender) {
+            println!("[DEBUG] Ignoring message from bridge bot: {}", sender);
             return Ok(());
         }
 
         if !self.rate_limiter.allow(&room_id) {
+            println!("[DEBUG] Rate limit exceeded for room: {}", room_id);
             warn!(
                 room_id = %room_id,
                 event_id = %event_id,
@@ -325,6 +350,7 @@ impl DingTalkBridge {
         }
 
         if self.is_blocked_msgtype(msgtype) {
+            println!("[DEBUG] Blocked message type: {}", msgtype);
             debug!(
                 room_id = %room_id,
                 event_id = %event_id,
@@ -335,35 +361,54 @@ impl DingTalkBridge {
         }
 
         let Some(mapping) = self.get_room_mapping_by_matrix(&room_id).await? else {
+            println!("[DEBUG] No room mapping found for Matrix room: {}", room_id);
             return Ok(());
         };
+
+        println!("[DEBUG] Found room mapping: {} -> {}", room_id, mapping.dingtalk_conversation_id);
 
         let source_text = formatted_body.unwrap_or(body);
         if let Some(command) =
             MatrixCommandHandler::parse_command(source_text, room_id.clone(), sender.clone())
         {
-            let outcome = self
-                .command_handler
-                .handle(command, &self.bot_intent)
-                .await?;
-            let reply = match outcome {
-                super::MatrixCommandOutcome::Success(message) => Some(message),
-                super::MatrixCommandOutcome::Error(message) => Some(message),
-                super::MatrixCommandOutcome::NoAction => None,
-            };
-            if let Some(reply) = reply {
-                let _ = self.bot_intent.send_text(&room_id, &reply).await;
+            println!("[DEBUG] Command detected in message: {:?}", command);
+            match self.command_handler.handle(command, &self.bot_intent).await {
+                Ok(outcome) => {
+                    println!("[DEBUG] Command handler outcome: {:?}", outcome);
+                    let reply = match outcome {
+                        super::MatrixCommandOutcome::Success(message) => Some(message),
+                        super::MatrixCommandOutcome::Error(message) => Some(message),
+                        super::MatrixCommandOutcome::NoAction => None,
+                    };
+                    if let Some(ref reply) = reply {
+                        println!("[DEBUG] Sending command reply to room {}: {}", room_id, reply);
+                        match self.bot_intent.send_text(&room_id, reply).await {
+                            Ok(_) => println!("[DEBUG] Command reply sent successfully"),
+                            Err(e) => println!("[DEBUG] Failed to send command reply: {}", e),
+                        }
+                    } else {
+                        println!("[DEBUG] No reply to send (NoAction)");
+                    }
+                }
+                Err(e) => {
+                    println!("[DEBUG] Command handler error: {}", e);
+                }
             }
             return Ok(());
         }
 
+        println!("[DEBUG] Not a command, proceeding to forward to DingTalk");
+
         if msgtype.starts_with("m.image") && !self.config.bridge.allow_images {
+            println!("[DEBUG] Image messages not allowed, skipping");
             return Ok(());
         }
         if msgtype.starts_with("m.video") && !self.config.bridge.allow_videos {
+            println!("[DEBUG] Video messages not allowed, skipping");
             return Ok(());
         }
         if msgtype.starts_with("m.audio") && !self.config.bridge.allow_audio {
+            println!("[DEBUG] Audio messages not allowed, skipping");
             return Ok(());
         }
         if (msgtype.starts_with("m.file") || msgtype == "m.sticker")
@@ -400,8 +445,11 @@ impl DingTalkBridge {
         }
         outbound = self.truncate_for_policy(&outbound);
         if outbound.trim().is_empty() {
+            println!("[DEBUG] Outbound message empty after truncation, skipping");
             return Ok(());
         }
+
+        println!("[DEBUG] Sending Matrix message to DingTalk: conversation_id={}, outbound={}", mapping.dingtalk_conversation_id, outbound);
 
         self.dingtalk_service
             .send_text_to_conversation(
@@ -418,6 +466,8 @@ impl DingTalkBridge {
                     mapping.dingtalk_conversation_id
                 )
             })?;
+
+        println!("[DEBUG] Successfully sent message to DingTalk: conversation_id={}", mapping.dingtalk_conversation_id);
 
         if !event_id.is_empty() {
             let message_mapping = MessageMapping::new(
@@ -448,33 +498,51 @@ impl DingTalkBridge {
         sender: &str,
         state_key: Option<&str>,
     ) {
+        println!("[DEBUG] handle_member_event called: membership={}, sender={}, state_key={:?}", membership, sender, state_key);
+
         if membership != "invite" {
+            println!("[DEBUG] Not an invite event, skipping");
             return;
         }
 
         let room_id = event.room_id.as_deref().unwrap_or_default();
         if room_id.is_empty() {
+            println!("[DEBUG] Room ID is empty, skipping");
             return;
         }
+
+        println!("[DEBUG] Processing invite for room: {}", room_id);
 
         let state_key = state_key.unwrap_or_default();
+        println!("[DEBUG] State key (invitee): {}", state_key);
+        println!("[DEBUG] Bot MXID: {}", self.bot_user_id);
+
         if !self.is_bot_mxid(state_key) {
+            println!("[DEBUG] Invite is not for the bot, skipping");
             return;
         }
 
+        println!("[DEBUG] Invite is for bot, attempting to join room: {}", room_id);
+
         match self.bot_intent.join_room(room_id).await {
-            Ok(joined_room_id) => info!(
-                sender = %sender,
-                room_id = %room_id,
-                joined_room_id = %joined_room_id,
-                "Auto-joined Matrix room after invite"
-            ),
-            Err(err) => warn!(
-                sender = %sender,
-                room_id = %room_id,
-                error = %err,
-                "Failed to auto-join Matrix room after invite"
-            ),
+            Ok(joined_room_id) => {
+                println!("[DEBUG] Successfully joined room: {}", joined_room_id);
+                info!(
+                    sender = %sender,
+                    room_id = %room_id,
+                    joined_room_id = %joined_room_id,
+                    "Auto-joined Matrix room after invite"
+                );
+            },
+            Err(err) => {
+                println!("[DEBUG] Failed to join room: {}", err);
+                warn!(
+                    sender = %sender,
+                    room_id = %room_id,
+                    error = %err,
+                    "Failed to auto-join Matrix room after invite"
+                );
+            }
         }
     }
 
@@ -523,7 +591,10 @@ impl DingTalkBridge {
     }
 
     fn is_bot_mxid(&self, mxid: &str) -> bool {
+        println!("[DEBUG] is_bot_mxid check: mxid={}, bot_user_id={}", mxid, self.bot_user_id);
+
         if mxid.eq_ignore_ascii_case(&self.bot_user_id) {
+            println!("[DEBUG] MXID matches bot_user_id, returning true");
             return true;
         }
 
@@ -531,7 +602,11 @@ impl DingTalkBridge {
             "@{}:{}",
             self.config.bridge.bot_username, self.config.bridge.domain
         );
-        mxid.eq_ignore_ascii_case(&configured_bot)
+        println!("[DEBUG] Configured bot MXID: {}", configured_bot);
+
+        let result = mxid.eq_ignore_ascii_case(&configured_bot);
+        println!("[DEBUG] MXID match result: {}", result);
+        result
     }
 
     fn is_bridge_bot_sender(&self, sender: &str) -> bool {
@@ -571,16 +646,23 @@ impl DingTalkBridge {
         content: &str,
         dingtalk_msg_id: Option<&str>,
     ) -> anyhow::Result<String> {
+        println!("[DEBUG] Forwarding DingTalk text: conversation_id={}, sender_id={}, content={}, msg_id={:?}",
+            conversation_id, sender_id, content, dingtalk_msg_id);
+
         let Some(mapping) = self.get_room_mapping_by_dingtalk(conversation_id).await? else {
+            println!("[DEBUG] No Matrix mapping found for DingTalk conversation: {}", conversation_id);
             anyhow::bail!(
                 "dingtalk conversation '{}' has no matrix mapping",
                 conversation_id
             );
         };
 
+        println!("[DEBUG] Found Matrix room mapping: {} -> {}", conversation_id, mapping.matrix_room_id);
+
         if let Some(msg_id) = dingtalk_msg_id {
             let dedupe_event_id = format!("dingtalk:{}", msg_id);
             if self.is_event_processed(&dedupe_event_id).await? {
+                println!("[DEBUG] DingTalk message already processed, skipping: {}", msg_id);
                 return Ok(String::new());
             }
         }
@@ -777,6 +859,7 @@ impl DingTalkBridge {
 
         match (conversation_id.as_deref(), content) {
             (conversation, Some(content)) => {
+                println!("[DEBUG] Replaying dead-letter: id={}, conversation={:?}, content={}", id, conversation, content);
                 self.dingtalk_service
                     .send_text_to_conversation(conversation, content, None, None, false)
                     .await
