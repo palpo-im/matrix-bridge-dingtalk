@@ -16,7 +16,7 @@
 # Otherwise, the bridge will attempt to load it from appservices/dingtalk-registration.yaml.
 registration:
   id: dingtalk
-  url: "http://localhost:9006"
+  url: "http://localhost:8080"
   as_token: "" #put_your_as_token_here_generate_with_openssl_rand_hex_32
   hs_token: "" #put_your_hs_token_here_generate_with_openssl_rand_hex_32
   sender_localpart: _dingtalk_bot
@@ -90,8 +90,8 @@ bridge:
 
   permissions:
     "*": "relay"
-    "127.0.0.1:8008": "full"
-    "@admin:127.0.0.1:8008": "admin"
+    "127.0.0.1:6006": "full"
+    "@admin:127.0.0.1:6006": "admin"
 
 logging:
   min_level: "info"
