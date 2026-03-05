@@ -126,44 +126,29 @@ pub struct DingTalkWebhookMessage {
     pub msgtype: Option<String>,
     #[serde(default)]
     pub text: Option<DingTalkWebhookText>,
-    #[serde(default)]
-    #[serde(
-        alias = "senderId",
-        alias = "senderStaffId",
-        alias = "senderUserId",
-        alias = "staffId",
-        alias = "userId"
-    )]
+    #[serde(default, alias = "senderId", alias = "senderUserId", alias = "userId")]
     pub sender_id: Option<String>,
-    #[serde(default)]
-    #[serde(alias = "conversationId", alias = "openConversationId")]
+    #[serde(default, alias = "senderStaffId", alias = "staffId")]
+    pub sender_staff_id: Option<String>,
+    #[serde(default, alias = "conversationId", alias = "openConversationId")]
     pub conversation_id: Option<String>,
-    #[serde(default)]
-    #[serde(alias = "createTime", alias = "createAt", alias = "time")]
+    #[serde(default, alias = "createTime", alias = "createAt", alias = "time")]
     pub create_time: Option<i64>,
-    #[serde(default)]
-    #[serde(alias = "msgId", alias = "messageId")]
+    #[serde(default, alias = "msgId", alias = "messageId")]
     pub msg_id: Option<String>,
-    #[serde(default)]
-    #[serde(alias = "sessionWebhook")]
+    #[serde(default, alias = "sessionWebhook")]
     pub session_webhook: Option<String>,
-    #[serde(default)]
-    #[serde(alias = "chatbotUserId")]
+    #[serde(default, alias = "chatbotUserId")]
     pub chatbot_user_id: Option<String>,
-    #[serde(default)]
-    #[serde(alias = "senderNick")]
+    #[serde(default, alias = "senderNick")]
     pub sender_nick: Option<String>,
-    #[serde(default)]
-    #[serde(alias = "conversationType")]
+    #[serde(default, alias = "conversationType")]
     pub conversation_type: Option<String>,
-    #[serde(default)]
-    #[serde(alias = "conversationTitle")]
+    #[serde(default, alias = "conversationTitle")]
     pub conversation_title: Option<String>,
-    #[serde(default)]
-    #[serde(alias = "sessionWebhookExpiredTime")]
+    #[serde(default, alias = "sessionWebhookExpiredTime")]
     pub session_webhook_expired_time: Option<i64>,
-    #[serde(default)]
-    #[serde(alias = "content")]
+    #[serde(default, alias = "content")]
     pub raw_content: Option<Value>,
 }
 
@@ -175,10 +160,16 @@ pub struct DingTalkWebhookText {
 
 impl DingTalkWebhookMessage {
     pub fn effective_sender_id(&self) -> Option<&str> {
-        self.sender_id
+        self.sender_staff_id
             .as_deref()
             .map(str::trim)
             .filter(|value| !value.is_empty())
+            .or_else(|| {
+                self.sender_id
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+            })
     }
 
     pub fn effective_conversation_id(&self) -> Option<&str> {
@@ -296,5 +287,27 @@ mod tests {
         );
         assert_eq!(event.conversation_type.as_deref(), Some("2"));
         assert_eq!(event.conversation_title.as_deref(), Some("stream-group"));
+    }
+
+    #[test]
+    fn parse_stream_payload_with_sender_id_and_sender_staff_id() {
+        let payload = serde_json::json!({
+            "msgtype": "text",
+            "text": { "content": "hello from stream" },
+            "senderId": "$:LWCP_v1:$wLdDOFKP0BUkWk6DPXMSKA==",
+            "senderStaffId": "manager_3165",
+            "conversationId": "cid_stream",
+            "msgId": "stream_msg_01"
+        });
+
+        let event: DingTalkWebhookMessage =
+            serde_json::from_value(payload).expect("stream payload should parse");
+
+        assert_eq!(
+            event.sender_id.as_deref(),
+            Some("$:LWCP_v1:$wLdDOFKP0BUkWk6DPXMSKA==")
+        );
+        assert_eq!(event.sender_staff_id.as_deref(), Some("manager_3165"));
+        assert_eq!(event.effective_sender_id(), Some("manager_3165"));
     }
 }

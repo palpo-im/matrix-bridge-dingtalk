@@ -67,10 +67,18 @@ impl DingTalkService {
     pub async fn start(&self, bridge: Arc<DingTalkBridge>) -> Result<()> {
         self.set_bridge(bridge).await;
         if !self.stream_config.stream.enabled {
+            println!("[DEBUG] ==================================");
+            println!("[DEBUG] DingTalk stream mode DISABLED");
+            println!("[DEBUG] Service is in callback compatibility mode only");
+            println!("[DEBUG] ==================================");
             info!("DingTalk stream mode disabled; service stays in callback compatibility mode");
             return Ok(());
         }
 
+        println!("[DEBUG] ==================================");
+        println!("[DEBUG] DingTalk stream mode ENABLED");
+        println!("[DEBUG] Starting stream client...");
+        println!("[DEBUG] ==================================");
         self.start_stream_mode().await?;
         Ok(())
     }
@@ -92,27 +100,55 @@ impl DingTalkService {
     }
 
     pub async fn handle_callback(&self, body: &str) -> Result<Value> {
-        println!("[DEBUG] DingTalk callback received: {}", body);
+        println!("[DEBUG] ==================================");
+        println!("[DEBUG] HANDLE_CALLBACK invoked");
+        println!("[DEBUG]   payload_length: {} bytes", body.len());
+        eprintln!("[DEBUG] HANDLE_CALLBACK invoked - payload_length: {} bytes", body.len());
+        
+        // Try to parse as JSON to show structure
+        if let Ok(json_val) = serde_json::from_str::<serde_json::Value>(body) {
+            println!("[DEBUG] Payload JSON keys: {:?}", json_val.as_object().map(|obj| obj.keys().collect::<Vec<_>>()));
+            if let Ok(pretty) = serde_json::to_string_pretty(&json_val) {
+                println!("[DEBUG] Payload structure:\n{}", pretty);
+            }
+        }
 
         let event: DingTalkWebhookMessage = serde_json::from_str(body)
-            .map_err(|e| anyhow::anyhow!("Failed to parse callback: {}", e))?;
+            .map_err(|e| {
+                println!("[DEBUG] ERROR parsing callback payload");
+                println!("[DEBUG]   error: {}", e);
+                println!("[DEBUG]   raw_payload: {}", body);
+                eprintln!("[DEBUG] Failed to parse callback: {}", e);
+                anyhow::anyhow!("Failed to parse callback: {}", e)
+            })?;
 
+        println!("[DEBUG]   Parsed callback payload successfully");
         self.process_event(event).await?;
+        println!("[DEBUG] HANDLE_CALLBACK completed successfully");
+        println!("[DEBUG] ==================================");
 
         Ok(serde_json::json!({"errcode": 0, "errmsg": "success"}))
     }
 
     async fn start_stream_mode(&self) -> Result<()> {
+        println!("[DEBUG] ==================================");
+        println!("[DEBUG] start_stream_mode() initializing...");
+        
         let client_id = self.stream_config.client_id.trim().to_string();
         let client_secret = self.stream_config.client_secret.trim().to_string();
         if client_id.is_empty() || client_secret.is_empty() {
+            println!("[DEBUG] ERROR: client_id or client_secret is empty!");
             anyhow::bail!("stream mode enabled but stream.client_id/stream.client_secret is empty");
         }
 
+        println!("[DEBUG] Creating DingTalkStreamClient...");
         let mut stream_client =
             DingTalkStreamClient::new(client_id, client_secret).map_err(|err| {
+                println!("[DEBUG] ERROR creating stream client: {}", err);
                 anyhow::anyhow!("failed to initialize dingtalk stream client: {}", err)
             })?;
+        
+        println!("[DEBUG] Setting stream client configuration...");
         {
             let cfg = stream_client.config_mut();
             cfg.openapi_host = self.stream_config.openapi_host.clone();
@@ -123,13 +159,20 @@ impl DingTalkService {
                 Duration::from_secs(self.stream_config.reconnect_interval_secs.max(1));
             cfg.local_ip = self.stream_config.local_ip.clone();
         }
+        println!("[DEBUG]   openapi_host: {}", self.stream_config.openapi_host);
+        println!("[DEBUG]   keep_alive_idle_secs: {}", self.stream_config.keep_alive_idle_secs);
+        println!("[DEBUG]   auto_reconnect: {}", self.stream_config.auto_reconnect);
+        println!("[DEBUG]   reconnect_interval_secs: {}", self.stream_config.reconnect_interval_secs);
 
+        println!("[DEBUG] Registering bot message callback handler...");
         let service = self.clone();
         stream_client.register_callback_handler(TOPIC_BOT_MESSAGE_CALLBACK, move |frame| {
             let service = service.clone();
             async move { service.handle_stream_bot_message(frame).await }
         });
+        println!("[DEBUG] Bot message callback handler registered for topic: {}", TOPIC_BOT_MESSAGE_CALLBACK);
 
+        println!("[DEBUG] Registering all event handler...");
         stream_client.register_all_event_handler(|frame| async move {
             let event_type = frame.header(EVENT_HEADER_TYPE).unwrap_or("unknown");
             debug!(
@@ -147,23 +190,53 @@ impl DingTalkService {
             "Starting DingTalk stream client"
         );
 
-        stream_client
-            .start()
-            .await
-            .map_err(|err| anyhow::anyhow!("dingtalk stream client stopped: {}", err))
+        println!("[DEBUG] Starting DingTalk stream client...");
+        println!("[DEBUG] ==================================");
+        match stream_client.start().await {
+            Ok(()) => {
+                println!("[DEBUG] Stream client exited normally");
+                Ok(())
+            }
+            Err(err) => {
+                println!("[DEBUG] ERROR: stream client failed with error");
+                println!("[DEBUG]   error: {}", err);
+                println!("[DEBUG]   error_to_string: {}", err.to_string());
+                eprintln!("[DEBUG] Stream client error: {}", err);
+                
+                // Check if this is a JSON parse error for 'time' field
+                let err_str = err.to_string();
+                if err_str.contains("missing field") && err_str.contains("time") {
+                    eprintln!("[DEBUG] This is a DingTalk message parse error (missing 'time' field)");
+                    eprintln!("[DEBUG] This may be a DingTalk SDK compatibility issue with some message types");
+                    eprintln!("[DEBUG] The stream client will attempt to reconnect...");
+                }
+                
+                Err(anyhow::anyhow!("dingtalk stream client stopped: {}", err))
+            }
+        }
     }
 
     async fn handle_stream_bot_message(
         &self,
         frame: DataFrame,
     ) -> dingtalk_sdk::Result<Option<DataFrameResponse>> {
-        println!("[DEBUG] DingTalk stream message received: message_id={:?}, topic={:?}",
-            frame.message_id(), frame.topic());
+        println!("[DEBUG] ==================================");
+        println!("[DEBUG] DingTalk stream message received");
+        println!("[DEBUG]   message_id: {:?}", frame.message_id());
+        println!("[DEBUG]   topic: {:?}", frame.topic());
+        println!("[DEBUG]   data_length: {} bytes", frame.data.len());
 
         let payload_result = serde_json::from_str::<Value>(&frame.data);
         let payload = match payload_result {
             Ok(payload) => {
                 println!("[DEBUG] DingTalk stream payload parsed successfully");
+                if let Some(obj) = payload.as_object() {
+                    let keys: Vec<_> = obj.keys().collect();
+                    println!("[DEBUG] Payload keys: {:?}", keys);
+                }
+                if let Ok(payload_str) = serde_json::to_string_pretty(&payload) {
+                    println!("[DEBUG] Payload:\n{}", payload_str);
+                }
                 payload
             },
             Err(err) => {
@@ -197,6 +270,12 @@ impl DingTalkService {
 
         let event: Result<DingTalkWebhookMessage> = serde_json::from_value(payload.clone())
             .map_err(|err| {
+                println!("[DEBUG] ==================================");
+                println!("[DEBUG] ERROR deserializing DingTalkWebhookMessage");
+                println!("[DEBUG]   error: {}", err);
+                println!("[DEBUG]   payload keys: {:?}", payload.as_object().map(|obj| obj.keys().collect::<Vec<_>>()));
+                println!("[DEBUG]   full payload: {}", serde_json::to_string_pretty(&payload).unwrap_or_default());
+                eprintln!("[DEBUG] Failed to deserialize: {}", err);
                 anyhow::anyhow!(
                     "parse stream payload as DingTalkWebhookMessage failed: {}",
                     err
@@ -212,6 +291,15 @@ impl DingTalkService {
                     msg_id.as_deref().unwrap_or("unknown"),
                     conversation_id.as_deref().unwrap_or("unknown")
                 );
+                println!("[DEBUG] DingTalk stream event deserialized successfully");
+                println!("[DEBUG]   msgtype: {:?}", event.msgtype);
+                println!("[DEBUG]   msg_id: {:?}", msg_id);
+                println!("[DEBUG]   conversation_id: {:?}", conversation_id);
+                println!("[DEBUG]   sender_id: {:?}", event.effective_sender_id());
+                println!("[DEBUG]   sender_nick: {:?}", event.sender_nick);
+                println!("[DEBUG]   conversation_type: {:?}", event.conversation_type);
+                println!("[DEBUG]   conversation_title: {:?}", event.conversation_title);
+                println!("[DEBUG]   create_time: {:?}", event.create_time);
                 if let Err(err) = self.process_event(event).await {
                     error!(
                         message_id = frame.message_id().unwrap_or_default(),
@@ -234,6 +322,21 @@ impl DingTalkService {
                 }
             }
             Err(err) => {
+                println!("[DEBUG] Failed to deserialize DingTalk stream payload");
+                println!("[DEBUG]   error: {}", err);
+                
+                // Log available fields for debugging
+                if let Some(obj) = payload.as_object() {
+                    println!("[DEBUG]   available_fields: {:?}", obj.keys().collect::<Vec<_>>());
+                    // Check if 'time' or its aliases exist
+                    let has_time_field = obj.contains_key("time");
+                    let has_create_time = obj.contains_key("createTime");
+                    let has_create_at = obj.contains_key("createAt");
+                    println!("[DEBUG]   has 'time' field: {}", has_time_field);
+                    println!("[DEBUG]   has 'createTime' field: {}", has_create_time);
+                    println!("[DEBUG]   has 'createAt' field: {}", has_create_at);
+                }
+                
                 error!(
                     message_id = frame.message_id().unwrap_or_default(),
                     error = %err,
@@ -258,12 +361,23 @@ impl DingTalkService {
             }
         }
 
+        println!("[DEBUG] ==================================");
+        // Always return success to keep stream alive even if processing failed
         Ok(Some(DataFrameResponse::success()))
     }
 
     async fn process_event(&self, event: DingTalkWebhookMessage) -> Result<()> {
-        println!("[DEBUG] DingTalk event received: msgtype={:?}, conversation={:?}, sender={:?}, msg_id={:?}",
-            event.msgtype, event.conversation_id, event.sender_id, event.msg_id);
+        println!("[DEBUG] ==================================");
+        println!("[DEBUG] Processing DingTalk event");
+        println!("[DEBUG]   msgtype: {:?}", event.msgtype);
+        println!("[DEBUG]   conversation_id: {:?}", event.conversation_id);
+        println!("[DEBUG]   sender_id: {:?}", event.sender_id);
+        println!("[DEBUG]   sender_nick: {:?}", event.sender_nick);
+        println!("[DEBUG]   msg_id: {:?}", event.msg_id);
+        println!("[DEBUG]   conversation_type: {:?}", event.conversation_type);
+        println!("[DEBUG]   conversation_title: {:?}", event.conversation_title);
+        println!("[DEBUG]   create_time: {:?}", event.create_time);
+        println!("[DEBUG]   chatbot_user_id: {:?}", event.chatbot_user_id);
 
         let guard = self.bridge.read().await;
         let bridge = guard
@@ -274,7 +388,7 @@ impl DingTalkService {
         let msgtype_normalized = msgtype.to_ascii_lowercase();
         let conversation_id = event.effective_conversation_id().unwrap_or("unknown");
 
-        println!("[DEBUG] Processing DingTalk event: type={}, conversation={}", msgtype, conversation_id);
+        println!("[DEBUG] Event type normalized: {}", msgtype_normalized);
 
         if let (Some(conversation_id), Some(session_webhook)) = (
             event.effective_conversation_id(),
@@ -300,12 +414,73 @@ impl DingTalkService {
                     );
                 }
             }
+            "group_add" => {
+                self.handle_group_add_event(bridge, &event).await?;
+            }
             _ => {
                 warn!("Unsupported message type: {}", msgtype);
             }
         }
 
         Ok(())
+    }
+
+    async fn handle_group_add_event(
+        &self,
+        _bridge: &Arc<DingTalkBridge>,
+        event: &DingTalkWebhookMessage,
+    ) -> Result<()> {
+        let conversation_id = event.effective_conversation_id().unwrap_or("unknown");
+        let conversation_name = event.conversation_title.as_deref().unwrap_or("Group");
+
+        info!(
+            "Bot added to DingTalk group: conversation_id={}, name={}",
+            conversation_id, conversation_name
+        );
+
+        // Prepare welcome message with openConversationId
+        let message = format!(
+            "✅ Bot successfully joined the group!\n\nGroup Information:\n- Name: {}\n- OpenConversationId: {}\n\nYou can now use provisioning commands to bridge this group to Matrix.",
+            conversation_name, conversation_id
+        );
+
+        println!("[DEBUG] Sending group-add message to DingTalk group: {}", conversation_id);
+
+        match self
+            .send_text_to_conversation(
+                Some(conversation_id),
+                &message,
+                None,
+                None,
+                false,
+            )
+            .await
+        {
+            Ok(response) => {
+                if response.is_success() {
+                    info!(
+                        "Successfully sent group-add message to group: {}",
+                        conversation_id
+                    );
+                    println!("[DEBUG] Group-add message sent successfully to: {}", conversation_id);
+                    Ok(())
+                } else {
+                    let error_msg = format!(
+                        "Failed to send group-add message: {} ({})",
+                        response.errmsg, response.errcode
+                    );
+                    warn!("{}", error_msg);
+                    Err(anyhow::anyhow!(error_msg))
+                }
+            }
+            Err(err) => {
+                warn!(
+                    "Error sending group-add message to {}: {}",
+                    conversation_id, err
+                );
+                Err(err)
+            }
+        }
     }
 
     async fn register_conversation_webhook(&self, conversation_id: &str, webhook_value: &str) {
@@ -336,12 +511,20 @@ impl DingTalkService {
         content: &str,
         event: &DingTalkWebhookMessage,
     ) -> Result<()> {
-        println!("[DEBUG] Handling DingTalk text message: content={}", content);
+        println!("[DEBUG] ==================================");
+        println!("[DEBUG] Handling DingTalk TEXT message");
+        println!("[DEBUG]   msg_id: {:?}", event.msg_id);
+        println!("[DEBUG]   sender_id: {}", event.effective_sender_id().unwrap_or("unknown"));
+        println!("[DEBUG]   sender_nick: {:?}", event.sender_nick);
+        println!("[DEBUG]   conversation_id: {}", event.effective_conversation_id().unwrap_or("unknown"));
+        println!("[DEBUG]   conversation_title: {:?}", event.conversation_title);
+        println!("[DEBUG]   conversation_type: {:?}", event.conversation_type);
+        println!("[DEBUG]   create_time: {:?}", event.create_time);
+        println!("[DEBUG]   content_length: {} chars", content.len());
+        println!("[DEBUG]   content: {}", content);
 
         let sender_id = event.effective_sender_id().unwrap_or("unknown");
         let conversation_id = event.effective_conversation_id().unwrap_or("unknown");
-
-        println!("[DEBUG] DingTalk text message details: sender_id={}, conversation_id={}", sender_id, conversation_id);
 
         info!(
             "Text message from {} in {}: {}",
@@ -353,13 +536,18 @@ impl DingTalkService {
             .await
         {
             Ok(matrix_event_id) => {
+                println!("[DEBUG] Successfully forwarded DingTalk message to Matrix");
+                println!("[DEBUG]   matrix_event_id: {}", matrix_event_id);
                 info!(
                     "Forwarded DingTalk message to Matrix: dingtalk_conversation={} matrix_event_id={}",
                     conversation_id, matrix_event_id
                 );
+                println!("[DEBUG] ==================================");
                 Ok(())
             }
             Err(err) => {
+                println!("[DEBUG] Failed to forward DingTalk message to Matrix");
+                println!("[DEBUG]   error: {}", err);
                 let dedupe_key = format!(
                     "dingtalk:{}:{}",
                     event.msg_id.as_deref().unwrap_or("unknown"),
@@ -383,6 +571,7 @@ impl DingTalkService {
                         );
                     }
                 }
+                println!("[DEBUG] ==================================");
                 Err(err)
             }
         }

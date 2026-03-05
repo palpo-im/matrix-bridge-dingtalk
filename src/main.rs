@@ -217,12 +217,23 @@ async fn start_web_server(config: Config, bridge: Arc<DingTalkBridge>) {
         .push(Router::with_path("admin").push(provisioning_api.router()));
 
     if config.dingtalk.callback.enabled {
+        println!("[DEBUG] ==================================");
+        println!("[DEBUG] DingTalk callback endpoint ENABLED");
+        println!("[DEBUG]   Path: POST /dingtalk/callback");
+        println!("[DEBUG]   Port: {}", port);
+        println!("[DEBUG] ==================================");
+        eprintln!("[DEBUG] DingTalk callback endpoint ENABLED at /dingtalk/callback");
         info!("DingTalk callback endpoint enabled (compatibility mode)");
         router = router.push(
             Router::with_path("dingtalk/callback")
                 .hoop(affix_state::inject(bridge.clone()))
                 .post(dingtalk_callback),
         );
+    } else {
+        println!("[DEBUG] ==================================");
+        println!("[DEBUG] DingTalk callback endpoint DISABLED");
+        println!("[DEBUG] Messages must come through stream mode");
+        println!("[DEBUG] ==================================");
     }
 
     let acceptor = TcpListener::new((bind_address, port)).bind().await;

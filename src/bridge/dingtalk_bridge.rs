@@ -536,6 +536,27 @@ impl DingTalkBridge {
                     joined_room_id = %joined_room_id,
                     "Auto-joined Matrix room after invite"
                 );
+
+                // Send welcome message to the newly joined room
+                let welcome_message = self.get_welcome_message();
+                println!("[DEBUG] Sending welcome message to newly joined room: {}", room_id);
+                match self.bot_intent.send_text(room_id, &welcome_message).await {
+                    Ok(_) => {
+                        println!("[DEBUG] Welcome message sent successfully to room: {}", room_id);
+                        info!(
+                            room_id = %room_id,
+                            "Welcome message sent to Matrix room"
+                        );
+                    }
+                    Err(err) => {
+                        println!("[DEBUG] Failed to send welcome message to room {}: {}", room_id, err);
+                        warn!(
+                            room_id = %room_id,
+                            error = %err,
+                            "Failed to send welcome message to Matrix room"
+                        );
+                    }
+                }
             },
             Err(err) => {
                 println!("[DEBUG] Failed to join room: {}", err);
@@ -640,6 +661,17 @@ impl DingTalkBridge {
         localpart.starts_with(prefix)
             && localpart.ends_with(suffix)
             && localpart.len() > prefix.len() + suffix.len()
+    }
+
+    fn get_welcome_message(&self) -> String {
+        r#"👋 Welcome to the DingTalk Matrix Bridge!
+
+Available commands:
+  !dingtalk help - Show all available commands
+  !dingtalk bridge <conversation_id> - Link this room to a DingTalk conversation
+  !dingtalk unbridge - Remove the bridge from this room
+
+To get started, use one of the commands above or type `!dingtalk help` for more information."#.to_string()
     }
 
     pub async fn forward_dingtalk_text(
