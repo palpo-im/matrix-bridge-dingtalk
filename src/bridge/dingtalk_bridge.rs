@@ -48,6 +48,7 @@ pub struct DingTalkBridge {
     matrix_event_parser: MatrixEventParser,
     matrix_formatter: MatrixToDingTalkFormatter,
     dingtalk_formatter: DingTalkToMatrixFormatter,
+    last_matrix_sender_by_conversation: Arc<RwLock<HashMap<String, String>>>,
     rate_limiter: Arc<RoomRateLimiter>,
     bot_user_id: String,
     started_at: Instant,
@@ -149,6 +150,7 @@ impl DingTalkBridge {
             matrix_event_parser,
             matrix_formatter,
             dingtalk_formatter,
+            last_matrix_sender_by_conversation: Arc::new(RwLock::new(HashMap::new())),
             rate_limiter,
             bot_user_id: bot_mxid,
             started_at: Instant::now(),
@@ -427,6 +429,10 @@ impl DingTalkBridge {
 
         println!("[DEBUG] Not a command, proceeding to forward to DingTalk");
 
+        let include_sender_header = self
+            .should_include_matrix_sender_header(&mapping.dingtalk_conversation_id, &sender)
+            .await;
+
         if msgtype.starts_with("m.image") && !self.config.bridge.allow_images {
             println!("[DEBUG] Image messages not allowed, skipping");
             return Ok(());
@@ -447,16 +453,25 @@ impl DingTalkBridge {
 
         let rendered = if msgtype == "m.emote" {
             self.matrix_formatter
-                .format_text(&format!("* {}", source_text), &sender)
+                .format_text_with_sender_header(
+                    &format!("* {}", source_text),
+                    &sender,
+                    include_sender_header,
+                )
         } else if matches!(
             msgtype,
             "m.image" | "m.video" | "m.audio" | "m.file" | "m.sticker"
         ) {
             let media_label = msgtype.trim_start_matches("m.");
             self.matrix_formatter
-                .format_text(&format!("[{}] {}", media_label, source_text), &sender)
+                .format_text_with_sender_header(
+                    &format!("[{}] {}", media_label, source_text),
+                    &sender,
+                    include_sender_header,
+                )
         } else {
-            self.matrix_formatter.format_text(source_text, &sender)
+            self.matrix_formatter
+                .format_text_with_sender_header(source_text, &sender, include_sender_header)
         };
 
         let mut outbound = rendered;
@@ -496,6 +511,8 @@ impl DingTalkBridge {
             })?;
 
         println!("[DEBUG] Successfully sent message to DingTalk: conversation_id={}", mapping.dingtalk_conversation_id);
+        self.mark_matrix_sender_header_state(&mapping.dingtalk_conversation_id, &sender)
+            .await;
 
         if !event_id.is_empty() {
             let message_mapping = MessageMapping::new(
@@ -732,6 +749,28 @@ impl DingTalkBridge {
         }
     }
 
+    async fn should_include_matrix_sender_header(
+        &self,
+        conversation_id: &str,
+        sender: &str,
+    ) -> bool {
+        let guard = self.last_matrix_sender_by_conversation.read().await;
+        match guard.get(conversation_id) {
+            Some(last_sender) => last_sender != sender.trim(),
+            None => true,
+        }
+    }
+
+    async fn mark_matrix_sender_header_state(&self, conversation_id: &str, sender: &str) {
+        let mut guard = self.last_matrix_sender_by_conversation.write().await;
+        guard.insert(conversation_id.to_string(), sender.trim().to_string());
+    }
+
+    async fn reset_matrix_sender_header_state(&self, conversation_id: &str) {
+        let mut guard = self.last_matrix_sender_by_conversation.write().await;
+        guard.remove(conversation_id);
+    }
+
     async fn ensure_ghost_registered(
         &self,
         dingtalk_user_id: &str,
@@ -757,6 +796,70 @@ impl DingTalkBridge {
                 .entry(ghost_mxid.to_string())
                 .or_insert_with(|| BridgeUser::new(dingtalk_user_id.to_string(), ghost_mxid.to_string()));
         }
+        Ok(())
+    }
+
+    async fn sync_ghost_display_name(
+        &self,
+        dingtalk_user_id: &str,
+        ghost_mxid: &str,
+        display_name: Option<&str>,
+    ) -> anyhow::Result<()> {
+        let Some(display_name) = display_name
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        else {
+            return Ok(());
+        };
+
+        let should_update = {
+            let users = self.users_by_mxid.read().await;
+            users
+                .get(ghost_mxid)
+                .and_then(|user| user.display_name.as_deref())
+                .map(str::trim)
+                != Some(display_name)
+        };
+
+        if !should_update {
+            return Ok(());
+        }
+
+        let endpoint = format!(
+            "/_matrix/client/v3/profile/{}/displayname?user_id={}",
+            urlencoding::encode(ghost_mxid),
+            urlencoding::encode(ghost_mxid)
+        );
+        let response = self
+            .appservice
+            .client
+            .raw_json(
+                reqwest::Method::PUT,
+                &endpoint,
+                Some(serde_json::json!({ "displayname": display_name })),
+            )
+            .await
+            .with_context(|| {
+                format!(
+                    "set display name for ghost {} to '{}' failed",
+                    ghost_mxid, display_name
+                )
+            })?;
+
+        if let Some(err) = Self::matrix_error_from_response(&response) {
+            return Err(anyhow!(
+                "set display name for ghost {} failed: {}",
+                ghost_mxid,
+                err
+            ));
+        }
+
+        let mut users = self.users_by_mxid.write().await;
+        let user = users.entry(ghost_mxid.to_string()).or_insert_with(|| {
+            BridgeUser::new(dingtalk_user_id.to_string(), ghost_mxid.to_string())
+        });
+        user.display_name = Some(display_name.to_string());
+        user.mark_synced();
         Ok(())
     }
 
@@ -971,6 +1074,7 @@ To get started, use one of the commands above or type `!dingtalk help` for more 
         &self,
         conversation_id: &str,
         sender_id: &str,
+        sender_nick: Option<&str>,
         content: &str,
         dingtalk_msg_id: Option<&str>,
     ) -> anyhow::Result<Option<String>> {
@@ -987,6 +1091,7 @@ To get started, use one of the commands above or type `!dingtalk help` for more 
         };
 
         println!("[DEBUG] Found Matrix room mapping: {} -> {}", conversation_id, mapping.matrix_room_id);
+        self.reset_matrix_sender_header_state(conversation_id).await;
 
         if let Some(msg_id) = dingtalk_msg_id {
             let dedupe_event_id = format!("dingtalk:{}", msg_id);
@@ -998,6 +1103,15 @@ To get started, use one of the commands above or type `!dingtalk help` for more 
 
         let sender_mxid = self.resolve_ghost_mxid(sender_id);
         self.ensure_ghost_registered(sender_id, &sender_mxid).await?;
+        if let Err(err) = self
+            .sync_ghost_display_name(sender_id, &sender_mxid, sender_nick)
+            .await
+        {
+            warn!(
+                "Failed to sync display name for ghost {} (sender_id={}): {}",
+                sender_mxid, sender_id, err
+            );
+        }
         self.ensure_ghost_joined(&mapping.matrix_room_id, &sender_mxid)
             .await?;
 
@@ -1477,8 +1591,15 @@ impl AppserviceHandler for BridgeHandler {
             && localpart.ends_with(suffix)
             && localpart.len() > prefix.len() + suffix.len()
         {
+            let cached_display_name = {
+                let users = self.bridge.users_by_mxid.read().await;
+                users
+                    .get(user_id)
+                    .and_then(|user| user.display_name.as_deref())
+                    .map(ToOwned::to_owned)
+            };
             return Ok(Some(serde_json::json!({
-                "displayname": localpart,
+                "displayname": cached_display_name.unwrap_or_else(|| localpart.to_string()),
             })));
         }
         Ok(None)

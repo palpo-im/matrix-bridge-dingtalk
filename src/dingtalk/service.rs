@@ -532,7 +532,13 @@ impl DingTalkService {
         );
 
         match bridge
-            .forward_dingtalk_text(conversation_id, sender_id, content, event.msg_id.as_deref())
+            .forward_dingtalk_text(
+                conversation_id,
+                sender_id,
+                event.sender_nick.as_deref(),
+                content,
+                event.msg_id.as_deref(),
+            )
             .await
         {
             Ok(Some(matrix_event_id)) => {

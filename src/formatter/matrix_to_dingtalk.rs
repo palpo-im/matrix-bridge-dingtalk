@@ -10,7 +10,16 @@ impl MatrixToDingTalkFormatter {
         }
     }
 
-    pub fn format_text(&self, content: &str, _sender: &str) -> String {
+    pub fn format_text(&self, content: &str, sender: &str) -> String {
+        self.format_text_with_sender_header(content, sender, true)
+    }
+
+    pub fn format_text_with_sender_header(
+        &self,
+        content: &str,
+        sender: &str,
+        include_sender_header: bool,
+    ) -> String {
         let mut result = content.to_string();
 
         result = self.sanitize_html_text(&result);
@@ -20,7 +29,12 @@ impl MatrixToDingTalkFormatter {
             result = format!("{}... (truncated)", &result[..self.max_text_length]);
         }
 
-        result
+        if include_sender_header {
+            let sender_label = self.sender_label(sender);
+            format!("[Matrix {}]\n{}", sender_label, result)
+        } else {
+            result
+        }
     }
 
     pub fn format_markdown(&self, content: &str, title: &str) -> (String, String) {
@@ -62,6 +76,17 @@ impl MatrixToDingTalkFormatter {
         result = result.replace("&quot;", "\"");
 
         result
+    }
+
+    fn sender_label(&self, sender: &str) -> String {
+        let sender = sender.trim();
+        let sender = sender.strip_prefix('@').unwrap_or(sender);
+        let sender = sender.split(':').next().unwrap_or(sender).trim();
+        if sender.is_empty() {
+            "unknown".to_string()
+        } else {
+            sender.to_string()
+        }
     }
 
     fn html_to_markdown(&self, html: &str) -> String {
@@ -114,13 +139,21 @@ mod tests {
         let formatter = MatrixToDingTalkFormatter::new();
         let input = r#"<a href=\"https://matrix.to/#/@_dingtalk_manager3165:127.0.0.1:6006\">_dingtalk_manager3165</a>: wefw"#;
         let output = formatter.format_text(input, "@alice:example.com");
-        assert_eq!(output, "_dingtalk_manager3165: wefw");
+        assert_eq!(output, "[Matrix alice]\n_dingtalk_manager3165: wefw");
     }
 
     #[test]
     fn format_text_converts_room_mention() {
         let formatter = MatrixToDingTalkFormatter::new();
         let output = formatter.format_text("hello @room", "@alice:example.com");
+        assert_eq!(output, "[Matrix alice]\nhello @所有人");
+    }
+
+    #[test]
+    fn format_text_without_sender_header() {
+        let formatter = MatrixToDingTalkFormatter::new();
+        let output =
+            formatter.format_text_with_sender_header("hello @room", "@alice:example.com", false);
         assert_eq!(output, "hello @所有人");
     }
 }
