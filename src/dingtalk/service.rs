@@ -535,12 +535,23 @@ impl DingTalkService {
             .forward_dingtalk_text(conversation_id, sender_id, content, event.msg_id.as_deref())
             .await
         {
-            Ok(matrix_event_id) => {
+            Ok(Some(matrix_event_id)) => {
                 println!("[DEBUG] Successfully forwarded DingTalk message to Matrix");
                 println!("[DEBUG]   matrix_event_id: {}", matrix_event_id);
                 info!(
                     "Forwarded DingTalk message to Matrix: dingtalk_conversation={} matrix_event_id={}",
                     conversation_id, matrix_event_id
+                );
+                println!("[DEBUG] ==================================");
+                Ok(())
+            }
+            Ok(None) => {
+                println!(
+                    "[DEBUG] DingTalk message skipped: no Matrix mapping or duplicate event"
+                );
+                info!(
+                    "Skipped DingTalk message forwarding: dingtalk_conversation={}",
+                    conversation_id
                 );
                 println!("[DEBUG] ==================================");
                 Ok(())

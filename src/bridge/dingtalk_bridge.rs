@@ -2,7 +2,7 @@ use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use anyhow::Context;
+use anyhow::{Context, anyhow};
 use chrono::Utc;
 use matrix_bot_sdk::appservice::{Appservice, AppserviceHandler, Intent};
 use matrix_bot_sdk::client::{MatrixAuth, MatrixClient};
@@ -11,11 +11,13 @@ use serde_json::Value;
 use tokio::sync::RwLock;
 use tracing::{debug, error, info, warn};
 use url::Url;
+use uuid::Uuid;
 
 use super::matrix_event_parser::{MatrixEvent, MatrixEventParser, ParsedEvent};
 use super::portal::{BridgePortal, PortalManager, RoomType};
 use super::puppet::{BridgePuppet, PuppetManager};
 use super::user::{BridgeUser, UserSyncPolicy};
+use super::command_handler::MatrixCommand;
 use super::{MatrixCommandHandler, PresenceHandler, ProvisioningCoordinator};
 use crate::config::Config;
 use crate::database::{
@@ -334,6 +336,21 @@ impl DingTalkBridge {
             anyhow::bail!("matrix event missing room_id or sender");
         }
 
+        if !event_id.is_empty()
+            && self
+                .message_store
+                .get_message_mapping(&event_id)
+                .await
+                .context("query message mapping by matrix event id failed")?
+                .is_some()
+        {
+            println!(
+                "[DEBUG] Matrix event already bridged (message mapping exists), skipping: {}",
+                event_id
+            );
+            return Ok(());
+        }
+
         // Parse and handle commands FIRST, before all other checks
         // This allows commands to work even without room mappings and from regular users
         let source_text = formatted_body.unwrap_or(body);
@@ -341,27 +358,35 @@ impl DingTalkBridge {
             MatrixCommandHandler::parse_command(source_text, room_id.clone(), sender.clone())
         {
             println!("[DEBUG] Command detected in message: {:?}", command);
-            match self.command_handler.handle(command, &self.bot_intent).await {
-                Ok(outcome) => {
-                    println!("[DEBUG] Command handler outcome: {:?}", outcome);
-                    let reply = match outcome {
-                        super::MatrixCommandOutcome::Success(message) => Some(message),
-                        super::MatrixCommandOutcome::Error(message) => Some(message),
-                        super::MatrixCommandOutcome::NoAction => None,
-                    };
-                    if let Some(ref reply) = reply {
-                        println!("[DEBUG] Sending command reply to room {}: {}", room_id, reply);
-                        match self.bot_intent.send_text(&room_id, reply).await {
-                            Ok(_) => println!("[DEBUG] Command reply sent successfully"),
-                            Err(e) => println!("[DEBUG] Failed to send command reply: {}", e),
+            let command_name = command.command.to_ascii_lowercase();
+            let reply = match command_name.as_str() {
+                "bridge" => Some(self.handle_matrix_bridge_command(&command).await),
+                "unbridge" => Some(self.handle_matrix_unbridge_command(&command).await),
+                "help" => Some(self.handle_matrix_help_command()),
+                _ => match self.command_handler.handle(command, &self.bot_intent).await {
+                    Ok(outcome) => {
+                        println!("[DEBUG] Command handler outcome: {:?}", outcome);
+                        match outcome {
+                            super::MatrixCommandOutcome::Success(message) => Some(message),
+                            super::MatrixCommandOutcome::Error(message) => Some(message),
+                            super::MatrixCommandOutcome::NoAction => None,
                         }
-                    } else {
-                        println!("[DEBUG] No reply to send (NoAction)");
                     }
+                    Err(e) => {
+                        println!("[DEBUG] Command handler error: {}", e);
+                        Some(format!("Command failed: {}", e))
+                    }
+                },
+            };
+
+            if let Some(ref reply) = reply {
+                println!("[DEBUG] Sending command reply to room {}: {}", room_id, reply);
+                match self.bot_intent.send_text(&room_id, reply).await {
+                    Ok(_) => println!("[DEBUG] Command reply sent successfully"),
+                    Err(e) => println!("[DEBUG] Failed to send command reply: {}", e),
                 }
-                Err(e) => {
-                    println!("[DEBUG] Command handler error: {}", e);
-                }
+            } else {
+                println!("[DEBUG] No reply to send (NoAction)");
             }
             return Ok(());
         }
@@ -649,18 +674,211 @@ impl DingTalkBridge {
             return false;
         }
 
-        let Some((prefix, suffix)) = self
-            .config
-            .bridge
-            .username_template
+        let username_template = self.ghost_username_template();
+        let Some((prefix, suffix)) = username_template
             .split_once("{{.}}")
-            .or_else(|| self.config.bridge.username_template.split_once("{user_id}"))
+            .or_else(|| username_template.split_once("{user_id}"))
         else {
             return false;
         };
         localpart.starts_with(prefix)
             && localpart.ends_with(suffix)
             && localpart.len() > prefix.len() + suffix.len()
+    }
+
+    fn ghost_username_template(&self) -> &str {
+        let template = self.config.ghosts.username_template.trim();
+        if template.contains("{{.}}") || template.contains("{user_id}") {
+            template
+        } else {
+            self.config.bridge.username_template.as_str()
+        }
+    }
+
+    fn resolve_ghost_localpart(&self, dingtalk_user_id: &str) -> String {
+        let safe_id = Self::sanitize_for_matrix_localpart(dingtalk_user_id);
+        let template = self.ghost_username_template();
+        if template.contains("{{.}}") {
+            return template.replace("{{.}}", &safe_id);
+        }
+        if template.contains("{user_id}") {
+            return template.replace("{user_id}", &safe_id);
+        }
+        format!("{}_{}", template.trim(), safe_id)
+    }
+
+    fn resolve_ghost_mxid(&self, dingtalk_user_id: &str) -> String {
+        format!(
+            "@{}:{}",
+            self.resolve_ghost_localpart(dingtalk_user_id),
+            self.config.bridge.domain
+        )
+    }
+
+    fn sanitize_for_matrix_localpart(raw: &str) -> String {
+        let mut out = String::new();
+        for ch in raw.trim().chars() {
+            if ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.' | '=' | '/') {
+                out.push(ch.to_ascii_lowercase());
+            } else {
+                out.push('_');
+            }
+        }
+        let normalized = out.trim_matches('_');
+        if normalized.is_empty() {
+            "unknown".to_string()
+        } else {
+            normalized.to_string()
+        }
+    }
+
+    async fn ensure_ghost_registered(
+        &self,
+        dingtalk_user_id: &str,
+        ghost_mxid: &str,
+    ) -> anyhow::Result<()> {
+        if self._intents.read().await.contains_key(ghost_mxid) {
+            return Ok(());
+        }
+
+        let intent = Intent::new(ghost_mxid.to_string(), self.appservice.client.clone());
+        intent
+            .ensure_registered()
+            .await
+            .with_context(|| format!("register ghost user {} failed", ghost_mxid))?;
+
+        {
+            let mut intents = self._intents.write().await;
+            intents.insert(ghost_mxid.to_string(), intent);
+        }
+        {
+            let mut users = self.users_by_mxid.write().await;
+            users
+                .entry(ghost_mxid.to_string())
+                .or_insert_with(|| BridgeUser::new(dingtalk_user_id.to_string(), ghost_mxid.to_string()));
+        }
+        Ok(())
+    }
+
+    async fn join_room_as_ghost(&self, room_id: &str, ghost_mxid: &str) -> anyhow::Result<()> {
+        let endpoint = format!(
+            "/_matrix/client/v3/join/{}?user_id={}",
+            urlencoding::encode(room_id),
+            urlencoding::encode(ghost_mxid)
+        );
+        let response = self
+            .appservice
+            .client
+            .raw_json(reqwest::Method::POST, &endpoint, Some(serde_json::json!({})))
+            .await
+            .with_context(|| format!("join room {} as {} request failed", room_id, ghost_mxid))?;
+        if let Some(err) = Self::matrix_error_from_response(&response) {
+            return Err(anyhow!(
+                "join room {} as {} failed: {}",
+                room_id,
+                ghost_mxid,
+                err
+            ));
+        }
+        if response.get("room_id").and_then(Value::as_str).is_none() {
+            return Err(anyhow!(
+                "join room {} as {} failed: missing room_id in response {}",
+                room_id,
+                ghost_mxid,
+                response
+            ));
+        }
+        Ok(())
+    }
+
+    async fn ensure_ghost_joined(&self, room_id: &str, ghost_mxid: &str) -> anyhow::Result<()> {
+        let first_join = self.join_room_as_ghost(room_id, ghost_mxid).await;
+        if first_join.is_ok() {
+            return Ok(());
+        }
+
+        if let Err(invite_err) = self.bot_intent.invite_user(ghost_mxid, room_id).await {
+            warn!(
+                "Invite ghost user {} to room {} failed before retrying join: {}",
+                ghost_mxid, room_id, invite_err
+            );
+        }
+
+        self.join_room_as_ghost(room_id, ghost_mxid)
+            .await
+            .map_err(|retry_err| {
+                anyhow!(
+                    "join room {} as {} failed after invite retry: first_error={}, retry_error={}",
+                    room_id,
+                    ghost_mxid,
+                    first_join.err().unwrap_or_else(|| anyhow!("unknown join error")),
+                    retry_err
+                )
+            })
+    }
+
+    async fn send_text_as_ghost(
+        &self,
+        room_id: &str,
+        ghost_mxid: &str,
+        body: &str,
+    ) -> anyhow::Result<String> {
+        let txn_id = Uuid::new_v4().to_string();
+        let endpoint = format!(
+            "/_matrix/client/v3/rooms/{}/send/m.room.message/{}?user_id={}",
+            urlencoding::encode(room_id),
+            urlencoding::encode(&txn_id),
+            urlencoding::encode(ghost_mxid)
+        );
+        let response = self
+            .appservice
+            .client
+            .raw_json(
+                reqwest::Method::PUT,
+                &endpoint,
+                Some(serde_json::json!({
+                    "msgtype": "m.text",
+                    "body": body
+                })),
+            )
+            .await
+            .with_context(|| format!("send text as ghost {} request failed", ghost_mxid))?;
+        if let Some(err) = Self::matrix_error_from_response(&response) {
+            return Err(anyhow!("send text as ghost {} failed: {}", ghost_mxid, err));
+        }
+
+        response
+            .get("event_id")
+            .and_then(Value::as_str)
+            .map(ToOwned::to_owned)
+            .context("missing event_id in send response")
+    }
+
+    fn matrix_error_from_response(response: &Value) -> Option<String> {
+        let errcode = response
+            .get("errcode")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty());
+        let error = response
+            .get("error")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .or_else(|| {
+                response
+                    .get("message")
+                    .and_then(Value::as_str)
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+            });
+
+        match (errcode, error) {
+            (Some(code), Some(message)) => Some(format!("{code}: {message}")),
+            (Some(code), None) => Some(code.to_string()),
+            (None, Some(message)) => Some(message.to_string()),
+            (None, None) => None,
+        }
     }
 
     fn get_welcome_message(&self) -> String {
@@ -674,22 +892,98 @@ Available commands:
 To get started, use one of the commands above or type `!dingtalk help` for more information."#.to_string()
     }
 
+    async fn handle_matrix_bridge_command(&self, command: &MatrixCommand) -> String {
+        let Some(raw_conversation_id) = command.args.first() else {
+            return "Usage: !dingtalk bridge <dingtalk_conversation_id>".to_string();
+        };
+
+        let conversation_id = raw_conversation_id
+            .trim()
+            .trim_matches('"')
+            .trim_matches('\'')
+            .to_string();
+        if conversation_id.is_empty() {
+            return "Usage: !dingtalk bridge <dingtalk_conversation_id>".to_string();
+        }
+
+        match self.get_room_mapping_by_matrix(&command.room_id).await {
+            Ok(Some(existing)) => {
+                if existing.dingtalk_conversation_id == conversation_id {
+                    return format!(
+                        "This Matrix room is already bridged to DingTalk conversation `{}`.",
+                        conversation_id
+                    );
+                }
+                return format!(
+                    "This Matrix room is already bridged to `{}`. Run `!dingtalk unbridge` first.",
+                    existing.dingtalk_conversation_id
+                );
+            }
+            Ok(None) => {}
+            Err(err) => {
+                return format!("Failed to query room mapping: {}", err);
+            }
+        }
+
+        match self.get_room_mapping_by_dingtalk(&conversation_id).await {
+            Ok(Some(existing)) => {
+                return format!(
+                    "DingTalk conversation `{}` is already bridged to Matrix room `{}`.",
+                    conversation_id, existing.matrix_room_id
+                );
+            }
+            Ok(None) => {}
+            Err(err) => {
+                return format!("Failed to query conversation mapping: {}", err);
+            }
+        }
+
+        match self
+            .bridge_room(&command.room_id, &conversation_id, None)
+            .await
+        {
+            Ok(_) => format!(
+                "Bridge created: Matrix room `{}` -> DingTalk conversation `{}`.",
+                command.room_id, conversation_id
+            ),
+            Err(err) => format!("Failed to create bridge: {}", err),
+        }
+    }
+
+    async fn handle_matrix_unbridge_command(&self, command: &MatrixCommand) -> String {
+        match self.unbridge_room(&command.room_id).await {
+            Ok(true) => format!("Bridge removed for Matrix room `{}`.", command.room_id),
+            Ok(false) => format!("No bridge exists for Matrix room `{}`.", command.room_id),
+            Err(err) => format!("Failed to remove bridge: {}", err),
+        }
+    }
+
+    fn handle_matrix_help_command(&self) -> String {
+        r#"Available DingTalk bridge commands:
+
+!dingtalk bridge <conversation_id> - Link this Matrix room to a DingTalk conversation
+!dingtalk unbridge - Remove the bridge from this Matrix room
+!dingtalk help - Show this help message"#
+            .to_string()
+    }
+
     pub async fn forward_dingtalk_text(
         &self,
         conversation_id: &str,
         sender_id: &str,
         content: &str,
         dingtalk_msg_id: Option<&str>,
-    ) -> anyhow::Result<String> {
+    ) -> anyhow::Result<Option<String>> {
         println!("[DEBUG] Forwarding DingTalk text: conversation_id={}, sender_id={}, content={}, msg_id={:?}",
             conversation_id, sender_id, content, dingtalk_msg_id);
 
         let Some(mapping) = self.get_room_mapping_by_dingtalk(conversation_id).await? else {
             println!("[DEBUG] No Matrix mapping found for DingTalk conversation: {}", conversation_id);
-            anyhow::bail!(
-                "dingtalk conversation '{}' has no matrix mapping",
+            warn!(
+                "DingTalk conversation '{}' has no Matrix mapping; skipping message",
                 conversation_id
             );
+            return Ok(None);
         };
 
         println!("[DEBUG] Found Matrix room mapping: {} -> {}", conversation_id, mapping.matrix_room_id);
@@ -698,17 +992,24 @@ To get started, use one of the commands above or type `!dingtalk help` for more 
             let dedupe_event_id = format!("dingtalk:{}", msg_id);
             if self.is_event_processed(&dedupe_event_id).await? {
                 println!("[DEBUG] DingTalk message already processed, skipping: {}", msg_id);
-                return Ok(String::new());
+                return Ok(None);
             }
         }
 
+        let sender_mxid = self.resolve_ghost_mxid(sender_id);
+        self.ensure_ghost_registered(sender_id, &sender_mxid).await?;
+        self.ensure_ghost_joined(&mapping.matrix_room_id, &sender_mxid)
+            .await?;
+
         let matrix_body = self.dingtalk_formatter.format_text(content, sender_id);
         let matrix_event_id = self
-            .bot_intent
-            .send_text(&mapping.matrix_room_id, &matrix_body)
+            .send_text_as_ghost(&mapping.matrix_room_id, &sender_mxid, &matrix_body)
             .await
             .with_context(|| {
-                format!("send text to matrix room {} failed", mapping.matrix_room_id)
+                format!(
+                    "send text to matrix room {} as ghost {} failed",
+                    mapping.matrix_room_id, sender_mxid
+                )
             })?;
 
         let dingtalk_message_id = dingtalk_msg_id
@@ -719,7 +1020,7 @@ To get started, use one of the commands above or type `!dingtalk help` for more 
             matrix_event_id.clone(),
             dingtalk_message_id.clone(),
             mapping.matrix_room_id.clone(),
-            self.bot_user_id.clone(),
+            sender_mxid,
             sender_id.to_string(),
         )
         .with_content_hash(Some(format!("{}:{}", sender_id, content)));
@@ -730,7 +1031,7 @@ To get started, use one of the commands above or type `!dingtalk help` for more 
                 .await?;
         }
 
-        Ok(matrix_event_id)
+        Ok(Some(matrix_event_id))
     }
 
     pub async fn bridge_room(
@@ -1165,13 +1466,17 @@ impl AppserviceHandler for BridgeHandler {
             .strip_prefix('@')
             .and_then(|value| value.split(':').next())
             .unwrap_or(user_id);
-        let prefix = self
-            .bridge
-            .config
-            .bridge
-            .username_template
-            .replace("{{.}}", "");
-        if localpart.starts_with(&prefix) {
+        let template = self.bridge.ghost_username_template();
+        let Some((prefix, suffix)) = template
+            .split_once("{{.}}")
+            .or_else(|| template.split_once("{user_id}"))
+        else {
+            return Ok(None);
+        };
+        if localpart.starts_with(prefix)
+            && localpart.ends_with(suffix)
+            && localpart.len() > prefix.len() + suffix.len()
+        {
             return Ok(Some(serde_json::json!({
                 "displayname": localpart,
             })));

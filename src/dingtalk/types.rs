@@ -160,12 +160,12 @@ pub struct DingTalkWebhookText {
 
 impl DingTalkWebhookMessage {
     pub fn effective_sender_id(&self) -> Option<&str> {
-        self.sender_staff_id
+        self.sender_id
             .as_deref()
             .map(str::trim)
             .filter(|value| !value.is_empty())
             .or_else(|| {
-                self.sender_id
+                self.sender_staff_id
                     .as_deref()
                     .map(str::trim)
                     .filter(|value| !value.is_empty())
@@ -308,6 +308,9 @@ mod tests {
             Some("$:LWCP_v1:$wLdDOFKP0BUkWk6DPXMSKA==")
         );
         assert_eq!(event.sender_staff_id.as_deref(), Some("manager_3165"));
-        assert_eq!(event.effective_sender_id(), Some("manager_3165"));
+        assert_eq!(
+            event.effective_sender_id(),
+            Some("$:LWCP_v1:$wLdDOFKP0BUkWk6DPXMSKA==")
+        );
     }
 }
