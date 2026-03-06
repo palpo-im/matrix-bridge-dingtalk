@@ -51,6 +51,62 @@ impl SqliteStores {
     pub fn media_store(&self) -> Arc<dyn MediaStore> {
         Arc::new(SqliteMediaStore::new(self.pool.clone()))
     }
+
+    pub async fn upsert_conversation_webhook(
+        &self,
+        conversation_id: &str,
+        webhook_value: &str,
+        expires_at: Option<i64>,
+    ) -> DatabaseResult<()> {
+        let pool = self.pool.clone();
+        let conversation_id = conversation_id.to_string();
+        let webhook_value = webhook_value.to_string();
+
+        tokio::task::spawn_blocking(move || {
+            let mut conn = get_conn(&pool)?;
+            diesel::sql_query(
+                "INSERT INTO conversation_webhooks (conversation_id, webhook_value, expires_at, updated_at)
+                 VALUES (?, ?, ?, datetime('now'))
+                 ON CONFLICT(conversation_id) DO UPDATE SET
+                   webhook_value = excluded.webhook_value,
+                   expires_at = excluded.expires_at,
+                   updated_at = datetime('now')",
+            )
+            .bind::<sql_types::Text, _>(&conversation_id)
+            .bind::<sql_types::Text, _>(&webhook_value)
+            .bind::<sql_types::Nullable<sql_types::BigInt>, _>(&expires_at)
+            .execute(&mut conn)?;
+            Ok(())
+        })
+        .await
+        .map_err(|e| DatabaseError::Query(e.to_string()))?
+    }
+
+    pub async fn list_active_conversation_webhooks(
+        &self,
+        now_ms: i64,
+    ) -> DatabaseResult<Vec<(String, String, Option<i64>)>> {
+        let pool = self.pool.clone();
+
+        tokio::task::spawn_blocking(move || {
+            let mut conn = get_conn(&pool)?;
+            let rows: Vec<ConversationWebhookRow> = diesel::sql_query(
+                "SELECT conversation_id, webhook_value, expires_at
+                 FROM conversation_webhooks
+                 WHERE expires_at IS NULL OR expires_at > ?
+                 ORDER BY updated_at DESC",
+            )
+            .bind::<sql_types::BigInt, _>(&now_ms)
+            .get_results(&mut conn)?;
+
+            Ok(rows
+                .into_iter()
+                .map(|row| (row.conversation_id, row.webhook_value, row.expires_at))
+                .collect())
+        })
+        .await
+        .map_err(|e| DatabaseError::Query(e.to_string()))?
+    }
 }
 
 struct SqliteRoomStore {
@@ -993,4 +1049,14 @@ impl MediaCacheEntryRow {
             updated_at: self.updated_at.parse().unwrap_or_else(|_| Utc::now()),
         }
     }
+}
+
+#[derive(QueryableByName)]
+struct ConversationWebhookRow {
+    #[diesel(sql_type = sql_types::Text)]
+    conversation_id: String,
+    #[diesel(sql_type = sql_types::Text)]
+    webhook_value: String,
+    #[diesel(sql_type = sql_types::Nullable<sql_types::BigInt>)]
+    expires_at: Option<i64>,
 }

@@ -164,6 +164,7 @@ impl DingTalkBridge {
 
         self.bot_intent.ensure_registered().await?;
         self.load_portals_from_db().await?;
+        self.restore_cached_conversation_webhooks().await;
 
         let service = self.dingtalk_service.clone();
         let bridge_clone = Arc::new(self.clone());
@@ -494,7 +495,8 @@ impl DingTalkBridge {
 
         println!("[DEBUG] Sending Matrix message to DingTalk: conversation_id={}, outbound={}", mapping.dingtalk_conversation_id, outbound);
 
-        self.dingtalk_service
+        let response = self
+            .dingtalk_service
             .send_text_to_conversation(
                 Some(&mapping.dingtalk_conversation_id),
                 &outbound,
@@ -509,6 +511,14 @@ impl DingTalkBridge {
                     mapping.dingtalk_conversation_id
                 )
             })?;
+        if !response.is_success() {
+            anyhow::bail!(
+                "dingtalk send failed for conversation {}: errcode={} errmsg={}",
+                mapping.dingtalk_conversation_id,
+                response.errcode,
+                response.errmsg
+            );
+        }
 
         println!("[DEBUG] Successfully sent message to DingTalk: conversation_id={}", mapping.dingtalk_conversation_id);
         self.mark_matrix_sender_header_state(&mapping.dingtalk_conversation_id, &sender)
@@ -1431,6 +1441,34 @@ To get started, use one of the commands above or type `!dingtalk help` for more 
             .insert_message_mapping(mapping)
             .await
             .context("insert message mapping failed")
+    }
+
+    pub async fn cache_conversation_webhook(
+        &self,
+        conversation_id: &str,
+        webhook_value: &str,
+        expires_at: Option<i64>,
+    ) -> anyhow::Result<()> {
+        self.stores
+            .upsert_conversation_webhook(conversation_id, webhook_value, expires_at)
+            .await
+            .context("upsert conversation webhook failed")
+    }
+
+    async fn restore_cached_conversation_webhooks(&self) {
+        let now_ms = Utc::now().timestamp_millis();
+        match self.stores.list_active_conversation_webhooks(now_ms).await {
+            Ok(entries) => {
+                for (conversation_id, webhook_value, _expires_at) in entries {
+                    self.dingtalk_service
+                        .register_conversation_webhook(&conversation_id, &webhook_value)
+                        .await;
+                }
+            }
+            Err(err) => {
+                warn!("Failed to restore cached conversation webhooks: {}", err);
+            }
+        }
     }
 
     async fn load_portals_from_db(&self) -> anyhow::Result<()> {

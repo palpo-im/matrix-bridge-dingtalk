@@ -231,6 +231,13 @@ CREATE TABLE IF NOT EXISTS media_cache (
     UNIQUE(content_hash, media_kind)
 );
 
+CREATE TABLE IF NOT EXISTS conversation_webhooks (
+    conversation_id TEXT PRIMARY KEY,
+    webhook_value TEXT NOT NULL,
+    expires_at INTEGER,
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE INDEX IF NOT EXISTS idx_room_mappings_matrix_id ON room_mappings(matrix_room_id);
 CREATE INDEX IF NOT EXISTS idx_room_mappings_dingtalk_id ON room_mappings(dingtalk_conversation_id);
 CREATE INDEX IF NOT EXISTS idx_user_mappings_matrix_id ON user_mappings(matrix_user_id);
@@ -241,4 +248,5 @@ CREATE INDEX IF NOT EXISTS idx_message_mappings_room ON message_mappings(room_id
 CREATE INDEX IF NOT EXISTS idx_processed_events_event_id ON processed_events(event_id);
 CREATE INDEX IF NOT EXISTS idx_dead_letters_status ON dead_letters(status);
 CREATE INDEX IF NOT EXISTS idx_media_cache_created_at ON media_cache(created_at);
+CREATE INDEX IF NOT EXISTS idx_conversation_webhooks_expires_at ON conversation_webhooks(expires_at);
 "#;

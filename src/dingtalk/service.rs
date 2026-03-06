@@ -396,6 +396,19 @@ impl DingTalkService {
         ) {
             self.register_conversation_webhook(conversation_id, session_webhook)
                 .await;
+            if let Err(err) = bridge
+                .cache_conversation_webhook(
+                    conversation_id,
+                    session_webhook,
+                    event.session_webhook_expired_time,
+                )
+                .await
+            {
+                warn!(
+                    "Failed to cache session webhook for conversation {}: {}",
+                    conversation_id, err
+                );
+            }
         }
 
         info!(
@@ -483,7 +496,7 @@ impl DingTalkService {
         }
     }
 
-    async fn register_conversation_webhook(&self, conversation_id: &str, webhook_value: &str) {
+    pub async fn register_conversation_webhook(&self, conversation_id: &str, webhook_value: &str) {
         let webhook_value = webhook_value.trim();
         if webhook_value.is_empty() {
             return;
