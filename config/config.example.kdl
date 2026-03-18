@@ -1,0 +1,195 @@
+// Matrix-DingTalk Bridge Configuration (KDL format)
+//
+// Environment override examples:
+// - CONFIG_PATH
+// - MATRIX_BRIDGE_DINGTALK_DB_URI
+// - MATRIX_BRIDGE_DINGTALK_AS_TOKEN / MATRIX_BRIDGE_DINGTALK_HS_TOKEN
+// - DINGTALK_CLIENT_ID / DINGTALK_CLIENT_SECRET
+// - DINGTALK_*
+// - MATRIX_BRIDGE_DINGTALK_PROVISIONING_READ_TOKEN / WRITE_TOKEN / DELETE_TOKEN
+//
+// Matrix appservice registration can be configured in two ways:
+// 1. Add a 'registration' section directly in this config file
+// 2. Or place it in ./appservices/dingtalk-registration.yaml (relative to this config file)
+//
+// If the registration section is present in this config file, it will be used.
+// Otherwise, the bridge will attempt to load it from appservices/dingtalk-registration.yaml.
+
+registration {
+    id "dingtalk"
+    url "http://localhost:8080"
+    as_token "" // put_your_as_token_here_generate_with_openssl_rand_hex_32
+    hs_token "" // put_your_hs_token_here_generate_with_openssl_rand_hex_32
+    sender_localpart "_dingtalk_bot"
+    namespaces {
+        users {
+            - exclusive=true regex="^@dingtalk_.*:127\\.0\\.0\\.1:8008$"
+        }
+        aliases {
+            - exclusive=true regex="^#_dingtalk_.*:127\\.0\\.0\\.1:8008$"
+        }
+        rooms {
+        }
+    }
+    rate_limited false
+    protocols {
+        - "dingtalk"
+    }
+}
+
+bridge {
+    // Matrix homeserver domain part
+    domain "127.0.0.1:8008"
+    // Matrix homeserver URL
+    homeserver_url "http://127.0.0.1:8008"
+    // Appservice HTTP listener
+    port 9006
+    bind_address "0.0.0.0"
+
+    // Bot identity
+    bot_username "_dingtalk_bot"
+    bot_displayname "DingTalk Bridge"
+    bot_avatar ""
+
+    // Bridged user templates
+    username_template "dingtalk_{{.}}"
+    displayname_template "{{.}} (DingTalk)"
+    avatar_template ""
+
+    // Matrix outbound controls
+    bridge_matrix_reply true
+    bridge_matrix_edit true
+    bridge_matrix_reactions false
+    bridge_matrix_redactions true
+    bridge_matrix_leave false
+    blocked_matrix_msgtypes {
+    }
+    max_text_length 0
+
+    // Degrade policy when outbound delivery fails
+    enable_failure_degrade true
+    failure_notice_template "[bridge degraded] failed to deliver message from Matrix event {matrix_event_id}: {error}"
+
+    // Per-room rate limit
+    message_limit 60
+    message_cooldown 1000
+
+    // Matrix feature flags
+    allow_plain_text true
+    allow_markdown true
+    allow_html false
+    allow_images false
+    allow_videos false
+    allow_audio false
+    allow_files false
+    max_media_size 0
+    enable_rich_text true
+    convert_cards false
+
+    // User sync maintenance
+    user_sync_interval_secs 300
+    user_mapping_stale_ttl_hours 720
+
+    // Internal operation timeout knobs
+    webhook_timeout 30
+    api_timeout 60
+
+    permissions {
+        "*" "relay"
+        "127.0.0.1:6006" "full"
+        "@admin:127.0.0.1:6006" "admin"
+    }
+}
+
+logging {
+    min_level "info"
+    writers {
+        - type="stdout" format="pretty"
+    }
+}
+
+database {
+    type "sqlite"
+    uri "sqlite://./dingtalk.db"
+    max_open_conns 10
+    max_idle_conns 1
+}
+
+auth {
+    // One webhook per DingTalk conversation. Value can be access_token or full webhook URL.
+    webhooks {
+        // "conversation_id" "access_token_or_full_webhook_url"
+    }
+    security {
+        type "sign"
+        keyword null
+        secret "CHANGE_ME_DINGTALK_SECRET"
+        ip_whitelist {
+        }
+    }
+}
+
+room {
+    default_visibility "private"
+    room_alias_prefix "_dingtalk_"
+    enable_room_creation true
+    kick_for 30000
+}
+
+channel {
+    name_pattern "[DingTalk] :name"
+    enable_channel_creation true
+    topic_format "Bridged from Matrix room {room_id}"
+    delete_options {
+        disable_messaging false
+        unset_room_alias true
+        unlist_from_directory true
+        set_invite_only true
+        ghosts_leave true
+    }
+}
+
+limits {
+    room_ghost_join_delay 6000
+    dingtalk_send_delay 1500
+    room_count -1
+    matrix_event_age_limit_ms 900000
+    dingtalk_rate_limit_per_minute 20
+}
+
+ghosts {
+    nick_pattern ":nick"
+    username_pattern ":username"
+    username_template "_dingtalk_{user_id}"
+    displayname_template "{username}"
+    avatar_url_template null
+}
+
+dingtalk {
+    client_id "CHANGE_ME_DINGTALK_CLIENT_ID"
+    client_secret "CHANGE_ME_DINGTALK_CLIENT_SECRET"
+    openapi_host "https://api.dingtalk.com"
+    keep_alive_idle_secs 120
+    reconnect_interval_secs 3
+    auto_reconnect true
+    local_ip null
+
+    stream {
+        enabled true
+    }
+
+    callback {
+        // Compatibility fallback for old callback mode. Stream mode does not require this endpoint.
+        enabled false
+        port 9007
+        bind_address "0.0.0.0"
+        token ""
+        aes_key null
+    }
+}
+
+metrics {
+    enabled false
+    port 9008
+    bind_address "127.0.0.1"
+}

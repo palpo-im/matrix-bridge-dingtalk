@@ -33,6 +33,50 @@ Usable baseline implemented. Core bidirectional text bridge, admin provisioning 
 
 ## Quick Start
 
+### Palpo KDL Configuration
+
+When running with Palpo, you can configure the bridge registration in your `palpo.kdl`:
+
+```kdl
+// Palpo server config — enable appservice bridge loading
+server_name "example.com"
+appservice_registration_dir "appservices"
+```
+
+And create the bridge config file as `config.kdl`:
+
+```kdl
+// Matrix-DingTalk Bridge Configuration (KDL format)
+// See config/config.example.kdl for all options
+
+registration {
+    id "dingtalk"
+    url "http://localhost:9006"
+    as_token "put_your_as_token_here"
+    hs_token "put_your_hs_token_here"
+    sender_localpart "_dingtalk_bot"
+}
+
+bridge {
+    domain "example.com"
+    homeserver_url "http://127.0.0.1:6006"
+    port 9006
+    bind_address "0.0.0.0"
+}
+
+database {
+    type "sqlite"
+    uri "sqlite://./dingtalk.db"
+}
+
+dingtalk {
+    client_id "YOUR_DINGTALK_CLIENT_ID"
+    client_secret "YOUR_DINGTALK_CLIENT_SECRET"
+}
+```
+
+### YAML Configuration
+
 1. Copy config and registration template:
 
 ```bash

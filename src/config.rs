@@ -8,3 +8,4 @@ pub use self::validator::ConfigError;
 
 mod parser;
 mod validator;
+mod kdl_support;

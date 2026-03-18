@@ -33,15 +33,27 @@ pub struct Config {
 
 impl Config {
     pub fn load() -> Result<Self, ConfigError> {
-        let config_path =
-            std::env::var("CONFIG_PATH").unwrap_or_else(|_| "config.yaml".to_string());
-
+        let config_path = std::env::var("CONFIG_PATH").unwrap_or_else(|_| {
+            if std::path::Path::new("config.kdl").exists() {
+                "config.kdl".to_string()
+            } else {
+                "config.yaml".to_string()
+            }
+        });
         Self::load_from_file(&config_path)
     }
 
     pub fn load_from_file<P: AsRef<Path>>(path: P) -> Result<Self, ConfigError> {
         let config_path = path.as_ref();
         let content = std::fs::read_to_string(config_path)?;
+
+        if super::kdl_support::is_kdl_file(config_path) {
+            let mut config: Config = super::kdl_support::parse_kdl_config(&content)
+                .map_err(ConfigError::Kdl)?;
+            config.apply_env_overrides()?;
+            config.validate()?;
+            return Ok(config);
+        }
 
         // Check if registration is defined in the config file
         let yaml_value: Value = serde_yaml::from_str(&content)?;
